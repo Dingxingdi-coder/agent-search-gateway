@@ -1,0 +1,14 @@
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "results": [
+      {
+        "title": "AnySearch result",
+        "url": "https://example.com/any",
+        "snippet": "AnySearch snippet",
+        "content": "Full provider content intentionally not admitted"
+      }
+    ]
+  }
+}

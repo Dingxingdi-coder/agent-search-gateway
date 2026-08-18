@@ -1,0 +1,8 @@
+{
+  "results": [
+    {
+      "url": "https://example.com/a",
+      "raw_content": "Extracted raw body"
+    }
+  ]
+}

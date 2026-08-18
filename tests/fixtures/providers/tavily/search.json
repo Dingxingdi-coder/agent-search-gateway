@@ -1,0 +1,10 @@
+{
+  "results": [
+    {
+      "title": "Example result",
+      "url": "https://example.com/a",
+      "content": "Search summary",
+      "raw_content": "Full raw body"
+    }
+  ]
+}

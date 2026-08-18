@@ -1,0 +1,138 @@
+"""OpenAI-compatible chat-completions LLM adapter."""
+
+import asyncio
+import json
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+
+from ..concurrency import CapacityGate
+from ..errors import ErrorCode, ExecutionFailure, ProtocolFailure
+from ..models import LLMInvocation, RetryPolicy
+from ..observability import SecretValue
+from ..retry import retry_async
+from .contracts import ChatMessage
+from .http import HttpJsonExecutor
+
+_RESERVED_EXTRA_BODY_KEYS = frozenset({"model", "messages"})
+
+
+class OpenAIChatCompletionsClient:
+    def __init__(
+        self,
+        *,
+        name: str,
+        api_url: str,
+        secret: SecretValue,
+        executor: HttpJsonExecutor,
+        quota: CapacityGate,
+        retry_policy: RetryPolicy,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> None:
+        self.name = name
+        self._endpoint = f"{api_url.rstrip('/')}/v1/chat/completions"
+        self._secret = secret
+        self._executor = executor
+        self._quota = quota
+        self._retry_policy = retry_policy
+        self._sleep = sleep
+
+    async def complete_text(
+        self,
+        invocation: LLMInvocation,
+        messages: Sequence[ChatMessage],
+    ) -> str:
+        self._validate_invocation(invocation)
+
+        async def operation() -> str:
+            payload = await self._request_once(invocation, messages)
+            return self._extract_content(payload)
+
+        async with self._quota.lease():
+            return await retry_async(
+                self._retry_policy,
+                operation,
+                is_retryable=lambda exc: isinstance(exc, ProtocolFailure),
+                sleep=self._sleep,
+            )
+
+    async def complete_json(
+        self,
+        invocation: LLMInvocation,
+        messages: Sequence[ChatMessage],
+    ) -> Mapping[str, object]:
+        self._validate_invocation(invocation)
+
+        async def operation() -> Mapping[str, object]:
+            payload = await self._request_once(invocation, messages)
+            content = self._extract_content(payload)
+            try:
+                decoded = json.loads(content)
+            except json.JSONDecodeError as exc:
+                raise self._protocol_failure("content was not valid JSON") from exc
+            if not isinstance(decoded, dict):
+                raise self._protocol_failure("JSON content must be an object")
+            return decoded
+
+        async with self._quota.lease():
+            return await retry_async(
+                self._retry_policy,
+                operation,
+                is_retryable=lambda exc: isinstance(exc, ProtocolFailure),
+                sleep=self._sleep,
+            )
+
+    async def aclose(self) -> None:
+        await self._executor.aclose()
+
+    def _validate_invocation(self, invocation: LLMInvocation) -> None:
+        if invocation.provider != self.name:
+            raise ExecutionFailure(
+                ErrorCode.LLM_STAGE_FAILED,
+                f"LLM invocation provider {invocation.provider} does not match {self.name}",
+            )
+        collisions = _RESERVED_EXTRA_BODY_KEYS.intersection(invocation.extra_body)
+        if collisions:
+            raise ExecutionFailure(
+                ErrorCode.LLM_STAGE_FAILED,
+                f"LLM extra_body cannot override: {', '.join(sorted(collisions))}",
+            )
+
+    async def _request_once(
+        self,
+        invocation: LLMInvocation,
+        messages: Sequence[ChatMessage],
+    ) -> object:
+        body: dict[str, object] = {
+            "model": invocation.model,
+            "messages": [dict(message) for message in messages],
+        }
+        body.update(invocation.extra_body)
+        return await self._executor.request_json(
+            "POST",
+            self._endpoint,
+            stage="llm",
+            headers={
+                "Authorization": f"Bearer {self._secret.reveal()}",
+                "Content-Type": "application/json",
+            },
+            json_body=body,
+        )
+
+    def _extract_content(self, payload: object) -> str:
+        if not isinstance(payload, dict):
+            raise self._protocol_failure("response must be an object")
+        choices = payload.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise self._protocol_failure("response choices are missing")
+        first = choices[0]
+        if not isinstance(first, dict):
+            raise self._protocol_failure("response choice is invalid")
+        message = first.get("message")
+        if not isinstance(message, dict):
+            raise self._protocol_failure("response message is missing")
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise self._protocol_failure("response content is empty")
+        return content
+
+    def _protocol_failure(self, reason: str) -> ProtocolFailure:
+        return ProtocolFailure(ErrorCode.PROTOCOL_ERROR, f"{self.name}/llm: {reason}")

@@ -1,0 +1,14 @@
+{
+  "query": "query",
+  "results": [
+    {
+      "position": 1,
+      "site_name": "Example",
+      "title": "TinyFish result",
+      "snippet": "TinyFish snippet",
+      "url": "https://example.com/tiny"
+    }
+  ],
+  "total_results": 1,
+  "page": 0
+}

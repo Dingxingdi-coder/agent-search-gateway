@@ -1,0 +1,88 @@
+[web_providers]
+default_max_concurrency = 3
+
+[web_providers.tavily]
+enable_search = true
+enable_fetch = true
+api_url = "https://api.tavily.com"
+api_key_env = "ENV_A"
+
+[web_providers.firecrawl]
+enable_search = true
+enable_fetch = true
+api_url = "https://api.firecrawl.dev"
+api_key_env = "ENV_B"
+
+[web_providers.exa]
+enable_search = true
+enable_fetch = true
+api_url = "https://api.exa.ai"
+api_key_env = "ENV_C"
+
+[web_providers.linkup]
+enable_search = true
+enable_fetch = true
+api_url = "https://api.linkup.so"
+api_key_env = "ENV_D"
+
+[web_providers.brave]
+enable_search = true
+enable_fetch = false
+api_url = "https://api.search.brave.com"
+api_key_env = "ENV_E"
+
+[web_providers.anysearch]
+enable_search = true
+enable_fetch = false
+api_url = "https://api.anysearch.com"
+api_key_env = "ENV_F"
+
+[web_providers.tinyfish]
+enable_search = true
+enable_fetch = true
+search_api_url = "https://api.tinyfish.ai/search"
+fetch_api_url = "https://api.tinyfish.ai/fetch"
+api_key_env = "ENV_G"
+
+[llm_providers]
+default_max_concurrency = 2
+
+[llm_providers.openai_main]
+protocol = "openai"
+api_endpoint = "chat_completions"
+api_url = "https://api.openai.com"
+api_key_env = "ENV_H"
+max_concurrency = 2
+
+[global_default_llm]
+provider = "openai_main"
+model = "gpt-4o-mini"
+extra_body = {}
+
+[[search_llm.providers]]
+provider = "openai_main"
+model = "gpt-4o-mini"
+extra_body = {}
+
+[fetch_llm]
+provider = "openai_main"
+model = "gpt-4o-mini"
+extra_body = {}
+
+[fetch_llm.judge]
+extra_body = {}
+
+[fetch_llm.safety]
+extra_body = {}
+
+[fetch_llm.content_clean]
+extra_body = {}
+
+[fetch_llm.focus_summary]
+extra_body = {}
+
+[retry]
+max_attempts = 3
+base_delay_seconds = 0.25
+max_delay_seconds = 2.0
+request_timeout_seconds = 30.0

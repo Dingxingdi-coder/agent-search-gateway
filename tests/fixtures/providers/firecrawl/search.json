@@ -1,0 +1,14 @@
+{
+  "success": true,
+  "data": {
+    "web": [
+      {
+        "title": "Firecrawl result",
+        "description": "Firecrawl snippet",
+        "url": "https://example.com/fire",
+        "markdown": "Clean markdown",
+        "rawHtml": "<main>Raw HTML</main>"
+      }
+    ]
+  }
+}
