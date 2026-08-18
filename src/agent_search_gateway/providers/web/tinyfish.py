@@ -2,6 +2,7 @@
 
 from urllib.parse import urlencode
 
+from ...errors import ExecutionFailure
 from ...observability import SecretValue
 from ...providers.contracts import KeywordSearchHit, URLFetchCandidate
 from ...url_normalization import NormalizedURL
@@ -10,6 +11,7 @@ from .common import (
     failure,
     non_empty_string,
     normalized_match,
+    optional_string,
     require_list,
     require_object,
 )
@@ -47,18 +49,22 @@ class TinyFishAdapter:
         results = require_list(root.get("results"), self.name, "search", "results")
         hits: list[KeywordSearchHit] = []
         for item in results:
-            result = require_object(item, self.name, "search", "result")
-            hits.append(
-                KeywordSearchHit(
-                    url=non_empty_string(result.get("url"), self.name, "search", "result.url"),
-                    title=non_empty_string(
-                        result.get("title"), self.name, "search", "result.title"
-                    ),
-                    snippet=non_empty_string(
-                        result.get("snippet"), self.name, "search", "result.snippet"
-                    ),
+            try:
+                result = require_object(item, self.name, "search", "result")
+                url = non_empty_string(result.get("url"), self.name, "search", "result.url")
+                hits.append(
+                    KeywordSearchHit(
+                        url=url,
+                        title=optional_string(
+                            result.get("title"), self.name, "search", "result.title"
+                        ),
+                        snippet=optional_string(
+                            result.get("snippet"), self.name, "search", "result.snippet"
+                        ),
+                    )
                 )
-            )
+            except ExecutionFailure:
+                continue
         return hits
 
     async def fetch(self, url: NormalizedURL) -> URLFetchCandidate:

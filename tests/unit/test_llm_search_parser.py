@@ -21,12 +21,17 @@ Some [other link](https://ignore-too.example)
 ## Result
 URL: http://Example.COM/three
 Abstract: Third result
+
+## Result
+    URL: https://Example.COM/indented
+    Abstract: Indented result
 """
 
     records = parse_search_markdown(markdown)
     assert [(str(record.url), record.abstract) for record in records] == [
         ("https://example.com/One?Q=1#frag", "First result"),
         ("http://example.com/three", "Third result"),
+        ("https://example.com/indented", "Indented result"),
     ]
 
 

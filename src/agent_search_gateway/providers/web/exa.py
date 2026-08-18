@@ -1,5 +1,6 @@
 """Exa search and contents adapter."""
 
+from ...errors import ExecutionFailure
 from ...observability import SecretValue
 from ...providers.contracts import KeywordSearchHit, URLFetchCandidate
 from ...url_normalization import NormalizedURL
@@ -45,20 +46,23 @@ class ExaAdapter:
         results = require_list(root.get("results"), self.name, "search", "results")
         hits: list[KeywordSearchHit] = []
         for item in results:
-            result = require_object(item, self.name, "search", "result")
-            url = non_empty_string(result.get("url"), self.name, "search", "result.url")
-            title = non_empty_string(result.get("title"), self.name, "search", "result.title")
-            text = optional_string(result.get("text"), self.name, "search", "result.text")
-            snippet = self._snippet(result, title)
-            hits.append(
-                KeywordSearchHit(
-                    url=url,
-                    title=title,
-                    snippet=snippet,
-                    raw_content=text,
-                    content=text,
+            try:
+                result = require_object(item, self.name, "search", "result")
+                url = non_empty_string(result.get("url"), self.name, "search", "result.url")
+                title = optional_string(result.get("title"), self.name, "search", "result.title")
+                text = optional_string(result.get("text"), self.name, "search", "result.text")
+                snippet = self._snippet(result, title)
+                hits.append(
+                    KeywordSearchHit(
+                        url=url,
+                        title=title,
+                        snippet=snippet,
+                        raw_content=text,
+                        content=text,
+                    )
                 )
-            )
+            except ExecutionFailure:
+                continue
         return hits
 
     async def fetch(self, url: NormalizedURL) -> URLFetchCandidate:
@@ -84,8 +88,11 @@ class ExaAdapter:
         if highlights_value is not None:
             highlights = require_list(highlights_value, self.name, "search", "result.highlights")
             if highlights:
-                first = non_empty_string(highlights[0], self.name, "search", "result.highlights[0]")
-                return first
+                first = optional_string(
+                    highlights[0], self.name, "search", "result.highlights[0]"
+                )
+                if first.strip():
+                    return first
         summary = optional_string(result.get("summary"), self.name, "search", "result.summary")
         return summary.strip() or title
 

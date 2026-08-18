@@ -6,7 +6,9 @@ import pytest
 from agent_search_gateway.config import resolve_config
 from agent_search_gateway.errors import ConfigFailure
 from agent_search_gateway.paths import RuntimePaths
+from agent_search_gateway.providers.contracts import ProviderCapabilities
 from agent_search_gateway.providers.defaults import build_default_registry
+from agent_search_gateway.providers.registry import WebProviderRegistration
 from agent_search_gateway.runtime import Runtime
 
 
@@ -145,3 +147,36 @@ async def test_runtime_assembly_builds_enabled_adapters_with_shared_quotas_and_c
     brave["enable_fetch"] = True
     with pytest.raises(ConfigFailure):
         resolve_config(bad, registry, environment)
+
+
+@pytest.mark.parametrize("reserved_key", ["name", "http_executor", "secret"])
+def test_runtime_rejects_reserved_web_adapter_kwargs(
+    tmp_path: Path,
+    reserved_key: str,
+) -> None:
+    registry = build_default_registry()
+    registry.register(
+        WebProviderRegistration(
+            name="custom",
+            capabilities=ProviderCapabilities(search=True, fetch=False),
+            factory=lambda **kwargs: kwargs,
+            allowed_config_keys=frozenset({"name", "http_executor", "secret"}),
+        )
+    )
+    raw = _config()
+    raw["web_providers"] = {
+        "default_max_concurrency": 3,
+        "custom": {
+            "enable_search": True,
+            "api_key_env": "ENV_CUSTOM",
+            reserved_key: "override",
+        },
+    }
+    resolved = resolve_config(
+        raw,
+        registry,
+        {"ENV_CUSTOM": "x", "ENV_D": "x", "ENV_E": "x"},
+    )
+
+    with pytest.raises(ConfigFailure, match="Reserved config key"):
+        Runtime.build(resolved, RuntimePaths.from_home(tmp_path), registry=registry)

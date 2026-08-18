@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import stat
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from pathlib import Path
@@ -96,26 +97,76 @@ class ForegroundDaemon:
     async def start(self) -> None:
         self.paths.socket_file.parent.mkdir(parents=True, exist_ok=True)
         self.paths.results_dir.mkdir(parents=True, exist_ok=True)
-        self._runtime = self._create_runtime()
         try:
-            self._server = await asyncio.start_unix_server(
-                self._handle_connection,
-                path=self.paths.socket_file,
-            )
-        except OSError as exc:
-            await self._close_runtime_after_startup_failure()
-            raise ConfigFailure(
-                ErrorCode.CONFIG_ERROR,
-                "Failed to bind daemon socket",
-            ) from exc
-        stat = self.paths.socket_file.stat()
-        self._socket_identity = (stat.st_dev, stat.st_ino)
-        self.ready.set()
-        try:
+            await self._prepare_socket_path()
+            self._runtime = self._create_runtime()
+            try:
+                self._server = await asyncio.start_unix_server(
+                    self._handle_connection,
+                    path=self.paths.socket_file,
+                )
+            except OSError as exc:
+                await self._close_runtime_after_startup_failure()
+                raise ConfigFailure(
+                    ErrorCode.CONFIG_ERROR,
+                    f"Failed to bind daemon socket: {self.paths.socket_file}",
+                ) from exc
+            socket_stat = self.paths.socket_file.stat()
+            self._socket_identity = (socket_stat.st_dev, socket_stat.st_ino)
+            self.ready.set()
             await self.stopped.wait()
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, KeyboardInterrupt):
             await self.stop_for_test()
             raise
+
+    async def _prepare_socket_path(self) -> None:
+        path = self.paths.socket_file
+        try:
+            existing = path.lstat()
+        except FileNotFoundError:
+            return
+        if not stat.S_ISSOCK(existing.st_mode):
+            return
+
+        identity = (existing.st_dev, existing.st_ino)
+        try:
+            _, writer = await asyncio.open_unix_connection(path=path)
+        except FileNotFoundError:
+            return
+        except ConnectionRefusedError:
+            pass
+        except OSError as exc:
+            raise ConfigFailure(
+                ErrorCode.CONFIG_ERROR,
+                f"Unable to inspect daemon socket: {path}",
+            ) from exc
+        else:
+            writer.close()
+            with suppress(ConnectionError, BrokenPipeError):
+                await writer.wait_closed()
+            raise ConfigFailure(
+                ErrorCode.CONFIG_ERROR,
+                f"Daemon is already running at: {path}",
+            )
+
+        try:
+            current = path.lstat()
+        except FileNotFoundError:
+            return
+        if not stat.S_ISSOCK(current.st_mode) or (current.st_dev, current.st_ino) != identity:
+            raise ConfigFailure(
+                ErrorCode.CONFIG_ERROR,
+                f"Daemon socket changed during startup: {path}",
+            )
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise ConfigFailure(
+                ErrorCode.CONFIG_ERROR,
+                f"Failed to remove stale daemon socket: {path}",
+            ) from exc
 
     def _create_runtime(self) -> RuntimeLike:
         try:

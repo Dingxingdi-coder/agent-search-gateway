@@ -64,14 +64,14 @@ class LinkupAdapter:
             headers=self._headers,
             json_body={
                 "url": str(url),
-                "includeRawHtml": True,
+                "includeRawContent": True,
                 "extractImages": False,
             },
         )
         root = require_object(payload, self.name, "fetch", "response")
         markdown = optional_string(root.get("markdown"), self.name, "fetch", "markdown")
-        raw_html = optional_string(root.get("rawHtml"), self.name, "fetch", "rawHtml")
-        raw = raw_html or markdown
+        raw_content = optional_string(root.get("rawContent"), self.name, "fetch", "rawContent")
+        raw = raw_content or markdown
         if not raw.strip():
             raise failure(self.name, "fetch", "page body is empty")
         return URLFetchCandidate(raw_content=raw, content=markdown)

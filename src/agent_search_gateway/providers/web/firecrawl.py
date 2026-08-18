@@ -1,5 +1,6 @@
 """Firecrawl v2 search and scrape adapter."""
 
+from ...errors import ExecutionFailure
 from ...observability import SecretValue
 from ...providers.contracts import KeywordSearchHit, URLFetchCandidate
 from ...url_normalization import NormalizedURL
@@ -69,24 +70,33 @@ class FirecrawlAdapter:
         web = require_list(data.get("web"), self.name, "search", "data.web")
         hits: list[KeywordSearchHit] = []
         for item in web:
-            result = require_object(item, self.name, "search", "result")
-            body = _page_body(result, self.name, "search")
-            hits.append(
-                KeywordSearchHit(
-                    url=non_empty_string(result.get("url"), self.name, "search", "result.url"),
-                    title=non_empty_string(
-                        result.get("title"), self.name, "search", "result.title"
-                    ),
-                    snippet=non_empty_string(
-                        result.get("description"),
-                        self.name,
-                        "search",
-                        "result.description",
-                    ),
-                    raw_content=body.raw_content,
-                    content=body.content,
+            try:
+                result = require_object(item, self.name, "search", "result")
+                url = non_empty_string(result.get("url"), self.name, "search", "result.url")
+                markdown = optional_string(
+                    result.get("markdown"), self.name, "search", "result.markdown"
                 )
-            )
+                raw_html = optional_string(
+                    result.get("rawHtml"), self.name, "search", "result.rawHtml"
+                )
+                hits.append(
+                    KeywordSearchHit(
+                        url=url,
+                        title=optional_string(
+                            result.get("title"), self.name, "search", "result.title"
+                        ),
+                        snippet=optional_string(
+                            result.get("description"),
+                            self.name,
+                            "search",
+                            "result.description",
+                        ),
+                        raw_content=raw_html or markdown,
+                        content=markdown,
+                    )
+                )
+            except ExecutionFailure:
+                continue
         return hits
 
     async def fetch(self, url: NormalizedURL) -> URLFetchCandidate:

@@ -22,6 +22,10 @@ from .models import (
 DecodedRequest: TypeAlias = Request | ErrorResponse
 RequestParser = Callable[[Mapping[str, object]], Request]
 
+_MAX_REQUEST_FRAME_BYTES = 1 << 20
+_MAX_RESPONSE_FRAME_BYTES = 8 << 20
+_RESPONSE_TIMEOUT_SECONDS = 300.0
+
 
 def _bad_request(message: str) -> ErrorResponse:
     return ErrorResponse(ErrorCode.BAD_REQUEST, message)
@@ -95,18 +99,43 @@ def decode_request_frame(frame: bytes) -> DecodedRequest:
 class NDJSONDecoder:
     def __init__(self) -> None:
         self._buffer = bytearray()
+        self._discarding_oversized_frame = False
 
     def feed(self, data: bytes) -> list[DecodedRequest]:
-        self._buffer.extend(data)
         decoded: list[DecodedRequest] = []
-        while True:
-            try:
-                boundary = self._buffer.index(b"\n")
-            except ValueError:
+        remaining = data
+        while remaining:
+            if self._discarding_oversized_frame:
+                boundary = remaining.find(b"\n")
+                if boundary < 0:
+                    return decoded
+                self._discarding_oversized_frame = False
+                remaining = remaining[boundary + 1 :]
+                continue
+
+            boundary = remaining.find(b"\n")
+            if boundary < 0:
+                capacity = _MAX_REQUEST_FRAME_BYTES - len(self._buffer)
+                if len(remaining) > capacity:
+                    self._buffer.clear()
+                    self._discarding_oversized_frame = True
+                    decoded.append(_bad_request("Request frame is too large"))
+                    return decoded
+                self._buffer.extend(remaining)
                 return decoded
-            frame = bytes(self._buffer[:boundary])
-            del self._buffer[: boundary + 1]
+
+            if len(self._buffer) + boundary > _MAX_REQUEST_FRAME_BYTES:
+                self._buffer.clear()
+                decoded.append(_bad_request("Request frame is too large"))
+                remaining = remaining[boundary + 1 :]
+                continue
+
+            self._buffer.extend(remaining[:boundary])
+            frame = bytes(self._buffer)
+            self._buffer.clear()
             decoded.append(decode_request_frame(frame))
+            remaining = remaining[boundary + 1 :]
+        return decoded
 
 
 def _request_payload(request: Request) -> dict[str, object]:
@@ -166,16 +195,29 @@ def _protocol_error(message: str) -> ProtocolFailure:
     return ProtocolFailure(ErrorCode.PROTOCOL_ERROR, message)
 
 
-async def send_request(socket_path: Path, request: Request) -> Response:
+async def send_request(
+    socket_path: Path,
+    request: Request,
+    *,
+    response_timeout_seconds: float = _RESPONSE_TIMEOUT_SECONDS,
+) -> Response:
     try:
-        reader, writer = await asyncio.open_unix_connection(path=socket_path)
+        reader, writer = await asyncio.open_unix_connection(
+            path=socket_path,
+            limit=_MAX_RESPONSE_FRAME_BYTES,
+        )
     except (FileNotFoundError, ConnectionRefusedError) as exc:
         raise DaemonUnavailable(str(socket_path)) from exc
 
     try:
         writer.write(encode_request(request))
         await writer.drain()
-        line = await reader.readline()
+        try:
+            line = await asyncio.wait_for(reader.readline(), timeout=response_timeout_seconds)
+        except TimeoutError as exc:
+            raise _protocol_error("Timed out waiting for daemon response") from exc
+        except ValueError as exc:
+            raise _protocol_error("Daemon response frame is too large") from exc
         if not line or not line.endswith(b"\n"):
             raise _protocol_error("Daemon response ended before newline")
         return parse_response_frame(line[:-1])

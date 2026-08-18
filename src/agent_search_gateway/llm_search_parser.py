@@ -26,7 +26,9 @@ def parse_search_markdown(markdown: str) -> list[SearchRecord]:
 
 def _parse_block(lines: list[str]) -> SearchRecord | None:
     urls = [
-        line[len(_URL_PREFIX) :].strip() for line in lines if line.strip().startswith(_URL_PREFIX)
+        line.strip()[len(_URL_PREFIX) :].strip()
+        for line in lines
+        if line.strip().startswith(_URL_PREFIX)
     ]
     abstracts = [
         line.strip()[len(_ABSTRACT_PREFIX) :].strip()

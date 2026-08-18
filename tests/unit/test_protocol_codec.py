@@ -7,7 +7,12 @@ from agent_search_gateway.models import (
     SuccessResponse,
     URLFetchRequest,
 )
-from agent_search_gateway.protocol import NDJSONDecoder, encode_request, encode_response
+from agent_search_gateway.protocol import (
+    _MAX_REQUEST_FRAME_BYTES,
+    NDJSONDecoder,
+    encode_request,
+    encode_response,
+)
 
 
 def test_ndjson_codec_buffers_partial_bytes_and_splits_multiple_requests() -> None:
@@ -44,3 +49,12 @@ def test_ndjson_codec_buffers_partial_bytes_and_splits_multiple_requests() -> No
     assert error == b'{"ok":false,"error":"bad_request","message":"bad"}\n'
     assert encode_request(ShutdownRequest()) == b'{"type":"shutdown"}\n'
     assert success.count(b"\n") == 1
+
+
+def test_ndjson_decoder_rejects_oversized_frame_and_resynchronizes() -> None:
+    decoder = NDJSONDecoder()
+    oversized = decoder.feed(b"x" * (_MAX_REQUEST_FRAME_BYTES + 1))
+    assert oversized == [ErrorResponse(ErrorCode.BAD_REQUEST, "Request frame is too large")]
+
+    decoded = decoder.feed(b"discard-the-rest\n{\"type\":\"shutdown\"}\n")
+    assert decoded == [ShutdownRequest()]

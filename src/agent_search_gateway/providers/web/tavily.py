@@ -1,5 +1,6 @@
 """Tavily search and extract adapter."""
 
+from ...errors import ExecutionFailure
 from ...observability import SecretValue
 from ...providers.contracts import KeywordSearchHit, URLFetchCandidate
 from ...url_normalization import NormalizedURL
@@ -45,24 +46,28 @@ class TavilyAdapter:
         results = require_list(root.get("results"), self.name, "search", "results")
         hits: list[KeywordSearchHit] = []
         for item in results:
-            result = require_object(item, self.name, "search", "result")
-            hits.append(
-                KeywordSearchHit(
-                    url=non_empty_string(result.get("url"), self.name, "search", "result.url"),
-                    title=non_empty_string(
-                        result.get("title"), self.name, "search", "result.title"
-                    ),
-                    snippet=non_empty_string(
-                        result.get("content"), self.name, "search", "result.content"
-                    ),
-                    raw_content=optional_string(
-                        result.get("raw_content"),
-                        self.name,
-                        "search",
-                        "result.raw_content",
-                    ),
+            try:
+                result = require_object(item, self.name, "search", "result")
+                url = non_empty_string(result.get("url"), self.name, "search", "result.url")
+                hits.append(
+                    KeywordSearchHit(
+                        url=url,
+                        title=optional_string(
+                            result.get("title"), self.name, "search", "result.title"
+                        ),
+                        snippet=optional_string(
+                            result.get("content"), self.name, "search", "result.content"
+                        ),
+                        raw_content=optional_string(
+                            result.get("raw_content"),
+                            self.name,
+                            "search",
+                            "result.raw_content",
+                        ),
+                    )
                 )
-            )
+            except ExecutionFailure:
+                continue
         return hits
 
     async def fetch(self, url: NormalizedURL) -> URLFetchCandidate:

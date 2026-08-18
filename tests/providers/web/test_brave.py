@@ -1,9 +1,6 @@
 import json
 from pathlib import Path
 
-import pytest
-
-from agent_search_gateway.errors import ExecutionFailure
 from agent_search_gateway.observability import SecretValue
 from agent_search_gateway.providers.contracts import KeywordSearchHit
 from agent_search_gateway.providers.web.brave import BraveAdapter
@@ -46,5 +43,4 @@ async def test_brave_adapter_maps_web_results_as_search_only_provider() -> None:
             [{"web": {"results": [{"url": 1, "title": "x", "description": "y"}]}}]
         ),
     )
-    with pytest.raises(ExecutionFailure):
-        await malformed.search("query")
+    assert await malformed.search("query") == []

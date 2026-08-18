@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import signal
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -91,12 +92,35 @@ async def run_command(
     stderr: TextIO,
 ) -> int:
     if args.command == "start":
+        daemon = daemon_factory(paths)
+        loop = asyncio.get_running_loop()
+        current_task = asyncio.current_task()
+        terminated = False
+        signal_handler_installed = False
+
+        def cancel_for_sigterm() -> None:
+            nonlocal terminated
+            terminated = True
+            if current_task is not None:
+                current_task.cancel()
+
         try:
-            daemon = daemon_factory(paths)
+            loop.add_signal_handler(signal.SIGTERM, cancel_for_sigterm)
+            signal_handler_installed = True
+        except (NotImplementedError, RuntimeError, ValueError):
+            pass
+        try:
             await daemon.start()
+        except asyncio.CancelledError:
+            if terminated:
+                return 128 + signal.SIGTERM
+            raise
         except GatewayError as exc:
             _write_text(stderr, exc.message)
             return EXIT_ERROR
+        finally:
+            if signal_handler_installed:
+                loop.remove_signal_handler(signal.SIGTERM)
         return EXIT_OK
 
     try:

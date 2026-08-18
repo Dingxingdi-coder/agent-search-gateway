@@ -22,6 +22,7 @@ from .scheduler.fetch import FetchScheduler
 from .url_store import URLStore
 
 HttpClientFactory = Callable[[], httpx.AsyncClient]
+_RESERVED_WEB_ADAPTER_KWARGS = frozenset({"name", "http_executor", "secret"})
 
 
 class Runtime:
@@ -127,6 +128,13 @@ class Runtime:
                 raise ConfigFailure(
                     ErrorCode.CONFIG_ERROR,
                     f"Invalid enabled web provider: {provider_config.name}",
+                )
+            reserved = set(provider_config.options) & _RESERVED_WEB_ADAPTER_KWARGS
+            if reserved:
+                names = ", ".join(sorted(reserved))
+                raise ConfigFailure(
+                    ErrorCode.CONFIG_ERROR,
+                    f"Reserved config key(s) for web provider {provider_config.name}: {names}",
                 )
             executor = HttpJsonExecutor(
                 http_client_factory(),

@@ -1,6 +1,7 @@
 """TOML and environment configuration resolution."""
 
 import copy
+import math
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -338,7 +339,12 @@ def resolve_llm_config(
 
 
 def _positive_float(value: object, label: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not math.isfinite(value)
+        or value <= 0
+    ):
         raise _config_error(f"{label} must be a positive number")
     return float(value)
 

@@ -1,11 +1,13 @@
 import asyncio
 import logging
+import socket
 from pathlib import Path
 
+import pytest
 from _pytest.logging import LogCaptureFixture
 
 from agent_search_gateway.daemon import ForegroundDaemon
-from agent_search_gateway.errors import ErrorCode, ExecutionFailure
+from agent_search_gateway.errors import ConfigFailure, ErrorCode, ExecutionFailure
 from agent_search_gateway.models import (
     ErrorResponse,
     KeywordSearchRequest,
@@ -90,5 +92,69 @@ async def test_daemon_loads_runtime_binds_socket_and_dispatches_typed_requests(
 
     await daemon.stop_for_test()
     await daemon_task
+    assert runtime.close_calls == 1
+    assert not paths.socket_file.exists()
+
+
+async def test_daemon_rejects_live_socket_and_recovers_stale_socket(tmp_path: Path) -> None:
+    live_paths = RuntimePaths(
+        config_file=tmp_path / "live.toml",
+        socket_file=tmp_path / "live.sock",
+        results_dir=tmp_path / "live-results",
+    )
+    live_runtime = _FakeRuntime()
+    live_daemon = ForegroundDaemon(live_paths, runtime_factory=lambda: live_runtime)
+    live_task = asyncio.create_task(live_daemon.start())
+    await asyncio.wait_for(live_daemon.ready.wait(), timeout=1.0)
+
+    duplicate_runtime = _FakeRuntime()
+    duplicate = ForegroundDaemon(live_paths, runtime_factory=lambda: duplicate_runtime)
+    try:
+        with pytest.raises(ConfigFailure, match="already running"):
+            await duplicate.start()
+        assert duplicate_runtime.close_calls == 0
+        assert await send_request(
+            live_paths.socket_file,
+            KeywordSearchRequest("still-live"),
+        ) == SuccessResponse("keyword:still-live")
+    finally:
+        await live_daemon.stop_for_test()
+        await live_task
+
+    stale_paths = RuntimePaths(
+        config_file=tmp_path / "stale.toml",
+        socket_file=tmp_path / "stale.sock",
+        results_dir=tmp_path / "stale-results",
+    )
+    stale_paths.socket_file.parent.mkdir(parents=True, exist_ok=True)
+    stale_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    stale_socket.bind(str(stale_paths.socket_file))
+    stale_socket.close()
+
+    stale_runtime = _FakeRuntime()
+    stale_daemon = ForegroundDaemon(stale_paths, runtime_factory=lambda: stale_runtime)
+    stale_task = asyncio.create_task(stale_daemon.start())
+    await asyncio.wait_for(stale_daemon.ready.wait(), timeout=1.0)
+    await stale_daemon.stop_for_test()
+    await stale_task
+    assert stale_runtime.close_calls == 1
+    assert not stale_paths.socket_file.exists()
+
+
+async def test_daemon_cancellation_cleans_up_runtime_and_socket(tmp_path: Path) -> None:
+    paths = RuntimePaths(
+        config_file=tmp_path / "cancel.toml",
+        socket_file=tmp_path / "cancel.sock",
+        results_dir=tmp_path / "cancel-results",
+    )
+    runtime = _FakeRuntime()
+    daemon = ForegroundDaemon(paths, runtime_factory=lambda: runtime)
+    task = asyncio.create_task(daemon.start())
+    await asyncio.wait_for(daemon.ready.wait(), timeout=1.0)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
     assert runtime.close_calls == 1
     assert not paths.socket_file.exists()

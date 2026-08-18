@@ -47,7 +47,7 @@ async def test_linkup_adapter_maps_search_results_and_fetch_markdown() -> None:
     }
     assert fetch_request.json_body == {
         "url": "https://example.com/linkup",
-        "includeRawHtml": True,
+        "includeRawContent": True,
         "extractImages": False,
     }
 
@@ -55,7 +55,7 @@ async def test_linkup_adapter_maps_search_results_and_fetch_markdown() -> None:
         name="linkup",
         api_url="https://linkup.example.test",
         secret=SecretValue("x"),
-        http_executor=RecordingJsonExecutor([{"markdown": "", "rawHtml": ""}]),
+        http_executor=RecordingJsonExecutor([{"markdown": "", "rawContent": ""}]),
     )
     with pytest.raises(ExecutionFailure):
         await bad.fetch(normalize_url("https://example.com/linkup"))

@@ -1,4 +1,5 @@
 {
   "markdown": "Linkup markdown",
-  "rawHtml": "<article>Linkup raw</article>"
+  "rawContent": "<article>Linkup raw</article>",
+  "contentType": "html"
 }

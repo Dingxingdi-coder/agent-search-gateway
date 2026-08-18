@@ -10,6 +10,8 @@ from agent_search_gateway.scheduler.fetch import FetchScheduler
 from agent_search_gateway.url_normalization import NormalizedURL, normalize_url
 from agent_search_gateway.url_store import URLStore
 
+_WAIT_TIMEOUT_SECONDS = 5.0
+
 
 class _ControlledFetch:
     name = "fetch"
@@ -37,6 +39,12 @@ class _SingleflightClient:
         self.active = 0
         self.max_active = 0
 
+    def entered_event(self, focus: str) -> asyncio.Event:
+        return self.focus_entered.setdefault(focus, asyncio.Event())
+
+    def release_event(self, focus: str) -> asyncio.Event:
+        return self.focus_release.setdefault(focus, asyncio.Event())
+
     async def complete_json(
         self,
         invocation: LLMInvocation,
@@ -58,8 +66,8 @@ class _SingleflightClient:
         focus_line = prompt.splitlines()[0]
         focus = focus_line.removeprefix("Focus: ")
         self.focus_calls.append(focus)
-        entered = self.focus_entered.setdefault(focus, asyncio.Event())
-        release = self.focus_release.setdefault(focus, asyncio.Event())
+        entered = self.entered_event(focus)
+        release = self.release_event(focus)
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         entered.set()
@@ -71,6 +79,10 @@ class _SingleflightClient:
 
     async def aclose(self) -> None:
         return None
+
+
+async def _await_focus(client: _SingleflightClient, focus: str) -> None:
+    await asyncio.wait_for(client.entered_event(focus).wait(), timeout=_WAIT_TIMEOUT_SECONDS)
 
 
 def _build(
@@ -114,42 +126,40 @@ async def test_url_fetch_singleflight_shares_exact_request_and_serializes_differ
     assert provider.calls == [url]
     assert client.safety_calls == 1
 
+    client.release_event("pricing")
     same_focus_first = asyncio.create_task(orchestrator.url_fetch(str(url), "pricing"))
-    while "pricing" not in client.focus_entered:
-        await asyncio.sleep(0)
-    await client.focus_entered["pricing"].wait()
+    await _await_focus(client, "pricing")
     same_focus_second = asyncio.create_task(orchestrator.url_fetch(str(url), " pricing "))
     await asyncio.sleep(0)
-    client.focus_release["pricing"].set()
+    client.release_event("pricing").set()
     assert tuple(await asyncio.gather(same_focus_first, same_focus_second)) == (
         "summary:pricing",
         "summary:pricing",
     )
     assert client.focus_calls.count("pricing") == 1
 
+    client.release_event("alpha")
     alpha = asyncio.create_task(orchestrator.url_fetch(str(url), "alpha"))
-    while "alpha" not in client.focus_entered:
-        await asyncio.sleep(0)
-    await client.focus_entered["alpha"].wait()
+    await _await_focus(client, "alpha")
+    client.release_event("beta")
     beta = asyncio.create_task(orchestrator.url_fetch(str(url), "beta"))
     await asyncio.sleep(0)
     assert "beta" not in client.focus_entered
-    client.focus_release["alpha"].set()
-    while "beta" not in client.focus_entered:
-        await asyncio.sleep(0)
-    client.focus_release["beta"].set()
+    client.release_event("alpha").set()
+    await _await_focus(client, "beta")
+    client.release_event("beta").set()
     assert tuple(await asyncio.gather(alpha, beta)) == ("summary:alpha", "summary:beta")
     assert client.max_active == 1
 
     other = normalize_url("https://example.com/other")
     store.admit(other, "known", content="content-other")
+    client.release_event("one")
     one = asyncio.create_task(orchestrator.url_fetch(str(url), "one"))
-    while "one" not in client.focus_entered:
-        await asyncio.sleep(0)
+    await _await_focus(client, "one")
+    client.release_event("two")
     two = asyncio.create_task(orchestrator.url_fetch(str(other), "two"))
-    while "two" not in client.focus_entered:
-        await asyncio.sleep(0)
+    await _await_focus(client, "two")
     assert client.active == 2
-    client.focus_release["one"].set()
-    client.focus_release["two"].set()
+    client.release_event("one").set()
+    client.release_event("two").set()
     assert tuple(await asyncio.gather(one, two)) == ("summary:one", "summary:two")
