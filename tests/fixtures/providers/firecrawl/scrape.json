@@ -1,0 +1,7 @@
+{
+  "success": true,
+  "data": {
+    "markdown": "Fetched markdown",
+    "rawHtml": "<article>Fetched raw</article>"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "results": [
+    {
+      "url": "https://example.com/exa",
+      "text": "Fetched Exa text"
+    }
+  ],
+  "statuses": [
+    {
+      "id": "https://example.com/exa",
+      "status": "success"
+    }
+  ]
+}

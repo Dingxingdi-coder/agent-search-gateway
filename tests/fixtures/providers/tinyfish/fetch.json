@@ -1,0 +1,12 @@
+{
+  "results": [
+    {
+      "url": "https://example.com/tiny",
+      "final_url": "https://example.com/tiny",
+      "title": "TinyFish result",
+      "text": "TinyFish fetched markdown",
+      "format": "markdown"
+    }
+  ],
+  "errors": []
+}

@@ -1,0 +1,11 @@
+{
+  "results": [
+    {
+      "url": "https://example.com/exa",
+      "title": "Exa result",
+      "highlights": ["First highlight"],
+      "summary": "Fallback summary",
+      "text": "Full Exa text"
+    }
+  ]
+}

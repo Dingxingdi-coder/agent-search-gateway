@@ -1,0 +1,58 @@
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+__pypackages__/
+
+# Python bytecode and tool caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+.hypothesis/
+.dmypy.json
+dmypy.json
+
+# Build and packaging artifacts
+build/
+dist/
+.eggs/
+*.egg
+*.egg-info/
+pip-wheel-metadata/
+wheels/
+
+# Coverage artifacts
+.coverage
+.coverage.*
+coverage.xml
+coverage.json
+htmlcov/
+
+# Test/build environments
+.tox/
+.nox/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+.envrc
+.direnv/
+
+# Editor and IDE metadata
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS metadata
+.DS_Store
+Thumbs.db

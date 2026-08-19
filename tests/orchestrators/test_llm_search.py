@@ -1,0 +1,164 @@
+import asyncio
+import json
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+
+import pytest
+
+from agent_search_gateway.concurrency import ProviderQuotaManager
+from agent_search_gateway.errors import ErrorCode, ExecutionFailure, InputFailure
+from agent_search_gateway.llm.stages import LLMStages
+from agent_search_gateway.models import LLMInvocation
+from agent_search_gateway.orchestrators.search import SearchOrchestrator
+from agent_search_gateway.providers.contracts import ChatMessage
+from agent_search_gateway.result_writer import ResultWriter
+from agent_search_gateway.url_normalization import normalize_url
+from agent_search_gateway.url_store import URLStore
+
+
+class _SearchClient:
+    def __init__(
+        self,
+        name: str,
+        text: str = "",
+        *,
+        failure: ExecutionFailure | None = None,
+        wait_for: asyncio.Event | None = None,
+        signal: asyncio.Event | None = None,
+    ) -> None:
+        self.name = name
+        self.text = text
+        self.failure = failure
+        self.wait_for = wait_for
+        self.signal = signal
+        self.text_calls: list[LLMInvocation] = []
+        self.json_calls = 0
+
+    async def complete_text(
+        self,
+        invocation: LLMInvocation,
+        messages: Sequence[ChatMessage],
+    ) -> str:
+        self.text_calls.append(invocation)
+        if self.signal is not None:
+            self.signal.set()
+        if self.wait_for is not None:
+            await self.wait_for.wait()
+        if self.failure is not None:
+            raise self.failure
+        return self.text
+
+    async def complete_json(
+        self,
+        invocation: LLMInvocation,
+        messages: Sequence[ChatMessage],
+    ) -> Mapping[str, object]:
+        self.json_calls += 1
+        return {"ok": True}
+
+    async def aclose(self) -> None:
+        return None
+
+
+def _orchestrator(
+    tmp_path: Path,
+    invocations: tuple[LLMInvocation, ...],
+    clients: dict[str, _SearchClient],
+    store: URLStore | None = None,
+) -> SearchOrchestrator:
+    fallback = invocations[0] if invocations else LLMInvocation("unused", "model", {})
+    stages = LLMStages(
+        clients,
+        judge=fallback,
+        safety=fallback,
+        content_clean=fallback,
+        focus_summary=fallback,
+    )
+    return SearchOrchestrator(
+        keyword_providers=(),
+        llm_invocations=invocations,
+        quotas=ProviderQuotaManager(web_limits={}, llm_limits={}),
+        stages=stages,
+        store=store or URLStore(),
+        result_writer=ResultWriter(tmp_path / "results"),
+    )
+
+
+async def test_llm_search_runs_independent_entries_and_isolates_pipeline_failures(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(InputFailure) as empty:
+        await _orchestrator(tmp_path, (), {}).llm_search("  ")
+    assert empty.value.code is ErrorCode.EMPTY_QUERY
+
+    with pytest.raises(ExecutionFailure) as absent:
+        await _orchestrator(tmp_path, (), {}).llm_search("find")
+    assert absent.value.code is ErrorCode.NO_LLM_SEARCH_PROVIDERS
+
+    release_first = asyncio.Event()
+    first_invocation = LLMInvocation("first", "model-1", {"entry": 1})
+    parser_invocation = LLMInvocation("parser", "model-2", {"entry": 2})
+    failed_invocation = LLMInvocation("failed", "model-3", {"entry": 3})
+    later_invocation = LLMInvocation("later", "model-4", {"entry": 4})
+    empty_invocation = LLMInvocation("empty", "model-5", {"entry": 5})
+    invocations = (
+        first_invocation,
+        parser_invocation,
+        failed_invocation,
+        later_invocation,
+        empty_invocation,
+    )
+    clients = {
+        "first": _SearchClient(
+            "first",
+            "## Result\nURL: https://EXAMPLE.com/a\nAbstract: First\n",
+            wait_for=release_first,
+        ),
+        "parser": _SearchClient("parser", "not restricted markdown", signal=release_first),
+        "failed": _SearchClient(
+            "failed",
+            failure=ExecutionFailure(ErrorCode.ALL_PROVIDERS_FAILED, "LLM failed"),
+        ),
+        "later": _SearchClient(
+            "later",
+            "## Result\nURL: https://example.com/a\nAbstract: Later duplicate\n"
+            "## Result\nURL: https://example.com/b\nAbstract: B result\n",
+        ),
+        "empty": _SearchClient(
+            "empty",
+            "## Result\nURL: https://example.com/empty\nAbstract:\n",
+        ),
+    }
+    store = URLStore()
+    orchestrator = _orchestrator(tmp_path, invocations, clients, store)
+
+    first_path = Path(await orchestrator.llm_search(" find docs "))
+    output = [json.loads(line) for line in first_path.read_text(encoding="utf-8").splitlines()]
+    assert output == [
+        {"url": "https://example.com/a", "abstract": "First"},
+        {"url": "https://example.com/b", "abstract": "B result"},
+    ]
+    assert [client.text_calls[0] for client in clients.values()] == list(invocations)
+    assert all(client.json_calls == 0 for client in clients.values())
+    stored_a = store.get(normalize_url("https://example.com/a"))
+    assert stored_a is not None and stored_a.abstract == "First" and stored_a.raw_content == ""
+
+    second_path = Path(await orchestrator.llm_search("find docs"))
+    assert second_path != first_path
+
+    all_failed_invocations = (
+        LLMInvocation("bad-one", "m1", {}),
+        LLMInvocation("bad-two", "m2", {}),
+    )
+    all_failed_clients = {
+        "bad-one": _SearchClient("bad-one", "malformed"),
+        "bad-two": _SearchClient(
+            "bad-two",
+            failure=ExecutionFailure(ErrorCode.ALL_PROVIDERS_FAILED, "failed"),
+        ),
+    }
+    before = set((tmp_path / "results").glob("llm-*.jsonl"))
+    with pytest.raises(ExecutionFailure) as all_failed:
+        await _orchestrator(tmp_path, all_failed_invocations, all_failed_clients).llm_search("x")
+    assert all_failed.value.code is ErrorCode.ALL_PROVIDERS_FAILED
+    assert set((tmp_path / "results").glob("llm-*.jsonl")) == before

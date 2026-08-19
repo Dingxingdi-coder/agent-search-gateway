@@ -1,0 +1,12 @@
+{
+  "web": {
+    "results": [
+      {
+        "url": "https://example.com/brave",
+        "title": "Brave result",
+        "description": "Brave snippet",
+        "extra_snippets": ["ignored"]
+      }
+    ]
+  }
+}
