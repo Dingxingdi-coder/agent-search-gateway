@@ -27,6 +27,7 @@ from .providers.defaults import build_default_registry
 from .runtime import Runtime
 
 _SHUTDOWN_GRACE_SECONDS = 10.0
+_SOCKET_PROBE_TIMEOUT_SECONDS = 2.0
 
 
 class _SearchOrchestratorLike(Protocol):
@@ -130,11 +131,19 @@ class ForegroundDaemon:
 
         identity = (existing.st_dev, existing.st_ino)
         try:
-            _, writer = await asyncio.open_unix_connection(path=path)
+            _, writer = await asyncio.wait_for(
+                asyncio.open_unix_connection(path=path),
+                timeout=_SOCKET_PROBE_TIMEOUT_SECONDS,
+            )
         except FileNotFoundError:
             return
         except ConnectionRefusedError:
             pass
+        except TimeoutError as exc:
+            raise ConfigFailure(
+                ErrorCode.CONFIG_ERROR,
+                f"Daemon socket did not respond in time: {path}",
+            ) from exc
         except OSError as exc:
             raise ConfigFailure(
                 ErrorCode.CONFIG_ERROR,

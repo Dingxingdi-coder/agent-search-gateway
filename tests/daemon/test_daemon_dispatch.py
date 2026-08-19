@@ -141,6 +141,39 @@ async def test_daemon_rejects_live_socket_and_recovers_stale_socket(tmp_path: Pa
     assert not stale_paths.socket_file.exists()
 
 
+async def test_daemon_socket_probe_timeout_preserves_existing_socket(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = RuntimePaths(
+        config_file=tmp_path / "probe-timeout.toml",
+        socket_file=tmp_path / "probe-timeout.sock",
+        results_dir=tmp_path / "probe-timeout-results",
+    )
+    paths.socket_file.parent.mkdir(parents=True, exist_ok=True)
+    existing_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    existing_socket.bind(str(paths.socket_file))
+    existing_socket.listen(1)
+
+    async def blocked_probe(*args: object, **kwargs: object) -> tuple[object, object]:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(asyncio, "open_unix_connection", blocked_probe)
+    monkeypatch.setattr("agent_search_gateway.daemon._SOCKET_PROBE_TIMEOUT_SECONDS", 0.01)
+    runtime = _FakeRuntime()
+    daemon = ForegroundDaemon(paths, runtime_factory=lambda: runtime)
+
+    try:
+        with pytest.raises(ConfigFailure, match="did not respond in time"):
+            await daemon.start()
+        assert paths.socket_file.exists()
+        assert runtime.close_calls == 0
+    finally:
+        existing_socket.close()
+        paths.socket_file.unlink(missing_ok=True)
+
+
 async def test_daemon_cancellation_cleans_up_runtime_and_socket(tmp_path: Path) -> None:
     paths = RuntimePaths(
         config_file=tmp_path / "cancel.toml",
