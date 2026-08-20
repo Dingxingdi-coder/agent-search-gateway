@@ -19,3 +19,11 @@ jobs:
       - run: uv run ruff check .
       - run: uv run mypy src tests
       - run: uv run pytest -v
+      - name: Smoke-test uv tool installation
+        env:
+          UV_TOOL_DIR: ${{ runner.temp }}/agent-search-gateway-tools
+          UV_TOOL_BIN_DIR: ${{ runner.temp }}/agent-search-gateway-bin
+        run: |
+          uv tool install .
+          "$UV_TOOL_BIN_DIR/agent-search-gateway" --help
+          "$UV_TOOL_BIN_DIR/agent-search-gateway" start --help

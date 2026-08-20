@@ -76,6 +76,17 @@ class SecretRedactingFilter(logging.Filter):
         return True
 
 
+def normalize_log_reason(value: str, max_chars: int = 160) -> str:
+    if max_chars <= 0:
+        raise ValueError("max_chars must be positive")
+    normalized = " ".join(value.split())
+    if len(normalized) <= max_chars:
+        return normalized
+    if max_chars == 1:
+        return "…"
+    return f"{normalized[: max_chars - 1]}…"
+
+
 def _render_string(value: str) -> str:
     if value and value.isprintable() and not any(
         character.isspace() or character in {'"', "\\"} for character in value

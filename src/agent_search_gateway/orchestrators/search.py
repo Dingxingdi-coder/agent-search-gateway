@@ -1,7 +1,9 @@
 """Keyword and LLM search workflow orchestration."""
 
 import asyncio
-from collections.abc import Sequence
+import logging
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from ..concurrency import ProviderQuotaManager
@@ -9,6 +11,7 @@ from ..errors import ErrorCode, ExecutionFailure, InputFailure
 from ..llm.stages import LLMStages, cheap_check
 from ..llm_search_parser import parse_search_markdown
 from ..models import LLMInvocation, SearchRecord
+from ..observability import log_event, normalize_log_reason
 from ..providers.contracts import KeywordSearchHit, KeywordSearchProvider
 from ..request_ids import validate_request_id
 from ..result_writer import ResultWriter
@@ -20,6 +23,7 @@ from ..url_store import URLStore
 class _StagedKeyword:
     url: NormalizedURL
     abstract: str
+    provider: str
     raw_content: str = ""
     content: str = ""
 
@@ -34,6 +38,8 @@ class SearchOrchestrator:
         stages: LLMStages,
         store: URLStore,
         result_writer: ResultWriter,
+        logger: logging.Logger | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._keyword_providers = tuple(keyword_providers)
         self._llm_invocations = tuple(llm_invocations)
@@ -41,6 +47,8 @@ class SearchOrchestrator:
         self._stages = stages
         self._store = store
         self._result_writer = result_writer
+        self._logger = logger or logging.getLogger(__name__)
+        self._monotonic = monotonic
 
     async def keyword_search(self, query: str, *, request_id: str) -> str:
         validate_request_id(request_id)
@@ -82,11 +90,27 @@ class SearchOrchestrator:
                 if staged.url not in seen:
                     seen.add(staged.url)
                     ordered_urls.append(staged.url)
+                else:
+                    log_event(
+                        self._logger,
+                        logging.DEBUG,
+                        "candidate_rejected",
+                        provider=staged.provider,
+                        url=str(staged.url),
+                        reason="duplicate",
+                    )
 
         records = [self._record_from_store(url) for url in ordered_urls]
-        return str(
-            self._result_writer.write_results("keyword", records, request_id=request_id)
+        path = self._result_writer.write_results("keyword", records, request_id=request_id)
+        log_event(
+            self._logger,
+            logging.DEBUG,
+            "results_written",
+            kind="keyword",
+            path=str(path),
+            results=len(records),
         )
+        return str(path)
 
     async def llm_search(self, prompt: str, *, request_id: str) -> str:
         validate_request_id(request_id)
@@ -123,31 +147,71 @@ class SearchOrchestrator:
                     seen.add(result.url)
                     ordered_urls.append(result.url)
         records = [self._record_from_store(url) for url in ordered_urls]
-        return str(self._result_writer.write_results("llm", records, request_id=request_id))
+        path = self._result_writer.write_results("llm", records, request_id=request_id)
+        log_event(
+            self._logger,
+            logging.DEBUG,
+            "results_written",
+            kind="llm",
+            path=str(path),
+            results=len(records),
+        )
+        return str(path)
 
     async def _run_llm_pipeline(
         self,
         invocation: LLMInvocation,
         prompt: str,
     ) -> list[SearchRecord]:
+        started = self._monotonic()
+        log_event(
+            self._logger,
+            logging.DEBUG,
+            "provider_started",
+            provider=invocation.provider,
+            stage="llm_search",
+            model=invocation.model,
+        )
         try:
             markdown = await self._stages.llm_search_markdown(invocation, prompt)
-            return parse_search_markdown(markdown)
+            records = parse_search_markdown(markdown)
         except asyncio.CancelledError:
             raise
-        except ExecutionFailure:
+        except ExecutionFailure as exc:
+            self._log_provider_failure(invocation.provider, "llm_search", started, exc)
             raise
         except Exception as exc:
+            self._log_provider_failure(invocation.provider, "llm_search", started, exc)
             raise ExecutionFailure(
                 ErrorCode.ALL_PROVIDERS_FAILED,
                 f"LLM search provider {invocation.provider} returned invalid data",
             ) from exc
+        log_event(
+            self._logger,
+            logging.DEBUG,
+            "provider_completed",
+            provider=invocation.provider,
+            stage="llm_search",
+            model=invocation.model,
+            output_chars=len(markdown),
+            results=len(records),
+            elapsed_ms=self._elapsed_ms(started),
+        )
+        return records
 
     async def _run_keyword_pipeline(
         self,
         provider: KeywordSearchProvider,
         query: str,
     ) -> list[_StagedKeyword]:
+        started = self._monotonic()
+        log_event(
+            self._logger,
+            logging.DEBUG,
+            "provider_started",
+            provider=provider.name,
+            stage="search",
+        )
         try:
             async with self.quotas.get_web(provider.name).lease():
                 hits = await provider.search(query)
@@ -155,21 +219,38 @@ class SearchOrchestrator:
                 raise TypeError("provider search result must be a list")
             staged: list[_StagedKeyword] = []
             for hit in hits:
-                staged_hit = await self._stage_keyword_hit(hit)
+                staged_hit = await self._stage_keyword_hit(hit, provider=provider.name)
                 if staged_hit is not None:
                     staged.append(staged_hit)
-            return staged
         except asyncio.CancelledError:
             raise
-        except ExecutionFailure:
+        except ExecutionFailure as exc:
+            self._log_provider_failure(provider.name, "search", started, exc)
             raise
         except Exception as exc:
+            self._log_provider_failure(provider.name, "search", started, exc)
             raise ExecutionFailure(
                 ErrorCode.ALL_PROVIDERS_FAILED,
                 f"Keyword provider {provider.name} returned invalid data",
             ) from exc
+        log_event(
+            self._logger,
+            logging.DEBUG,
+            "provider_completed",
+            provider=provider.name,
+            stage="search",
+            hits=len(hits),
+            results=len(staged),
+            elapsed_ms=self._elapsed_ms(started),
+        )
+        return staged
 
-    async def _stage_keyword_hit(self, hit: KeywordSearchHit) -> _StagedKeyword | None:
+    async def _stage_keyword_hit(
+        self,
+        hit: KeywordSearchHit,
+        *,
+        provider: str,
+    ) -> _StagedKeyword | None:
         if not isinstance(hit, KeywordSearchHit):
             raise TypeError("keyword hit has invalid type")
         for value in (hit.url, hit.title, hit.snippet, hit.raw_content, hit.content):
@@ -178,27 +259,117 @@ class SearchOrchestrator:
 
         abstract = hit.snippet.strip() or hit.title.strip()
         if not abstract:
+            log_event(
+                self._logger,
+                logging.DEBUG,
+                "candidate_rejected",
+                provider=provider,
+                url=hit.url,
+                reason="empty_abstract",
+            )
             return None
         url = normalize_url(hit.url)
+        log_event(
+            self._logger,
+            logging.DEBUG,
+            "candidate_accepted",
+            provider=provider,
+            url=str(url),
+            abstract_chars=len(abstract),
+        )
         current = self._store.get(url)
         if current is not None and not current.available:
-            return _StagedKeyword(url=url, abstract=abstract)
+            self._log_body_decision(provider, url, "body_skipped", "stored_unavailable")
+            return _StagedKeyword(url=url, abstract=abstract, provider=provider)
 
+        had_body = bool(hit.raw_content or hit.content)
         raw_content = hit.raw_content if hit.raw_content.strip() else ""
         content = hit.content if hit.content.strip() else ""
         candidate = content or raw_content
-        if not candidate or not cheap_check(candidate):
-            return _StagedKeyword(url=url, abstract=abstract)
+        if not candidate:
+            reason = "cheap_check" if had_body else "no_body"
+            event = "body_rejected" if had_body else "body_skipped"
+            self._log_body_decision(provider, url, event, reason)
+            return _StagedKeyword(url=url, abstract=abstract, provider=provider)
+        if not cheap_check(candidate):
+            self._log_body_decision(provider, url, "body_rejected", "cheap_check")
+            return _StagedKeyword(url=url, abstract=abstract, provider=provider)
 
         decision = await self._stages.judge(candidate)
         if not decision.ok:
-            return _StagedKeyword(url=url, abstract=abstract)
+            self._log_body_decision(
+                provider,
+                url,
+                "body_rejected",
+                "judge_rejected",
+                decision_reason=normalize_log_reason(decision.reason),
+            )
+            return _StagedKeyword(url=url, abstract=abstract, provider=provider)
+        log_event(
+            self._logger,
+            logging.DEBUG,
+            "body_accepted",
+            provider=provider,
+            url=str(url),
+            raw_chars=len(raw_content),
+            content_chars=len(content),
+        )
         return _StagedKeyword(
             url=url,
             abstract=abstract,
+            provider=provider,
             raw_content=raw_content,
             content=content,
         )
+
+    def _log_body_decision(
+        self,
+        provider: str,
+        url: NormalizedURL,
+        event: str,
+        reason: str,
+        *,
+        decision_reason: str = "",
+    ) -> None:
+        if not decision_reason:
+            log_event(
+                self._logger,
+                logging.DEBUG,
+                event,
+                provider=provider,
+                url=str(url),
+                reason=reason,
+            )
+            return
+        log_event(
+            self._logger,
+            logging.DEBUG,
+            event,
+            provider=provider,
+            url=str(url),
+            reason=reason,
+            decision_reason=decision_reason,
+        )
+
+    def _log_provider_failure(
+        self,
+        provider: str,
+        stage: str,
+        started: float,
+        exc: Exception,
+    ) -> None:
+        log_event(
+            self._logger,
+            logging.DEBUG,
+            "provider_failed",
+            provider=provider,
+            stage=stage,
+            error_type=type(exc).__name__,
+            elapsed_ms=self._elapsed_ms(started),
+        )
+
+    def _elapsed_ms(self, started: float) -> int:
+        return max(0, int((self._monotonic() - started) * 1000))
 
     def _record_from_store(self, url: NormalizedURL) -> SearchRecord:
         record = self._store.get(url)

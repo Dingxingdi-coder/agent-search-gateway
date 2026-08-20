@@ -9,9 +9,12 @@ from agent_search_gateway.llm.stages import LLMStages
 from agent_search_gateway.models import LLMInvocation
 from agent_search_gateway.orchestrators.search import SearchOrchestrator
 from agent_search_gateway.providers.contracts import ChatMessage, KeywordSearchHit
+from agent_search_gateway.request_ids import bind_request_id
 from agent_search_gateway.result_writer import ResultWriter
 from agent_search_gateway.url_normalization import normalize_url
 from agent_search_gateway.url_store import URLStore
+from tests.support.fakes import FakeKeywordSearchProvider
+from tests.support.logging import structured_test_logger
 
 
 class _JudgeClient:
@@ -183,3 +186,137 @@ async def test_keyword_search_validates_body_then_commits_deterministic_first_wr
     second_path = Path(await orchestrator.keyword_search("query", request_id="22222222"))
     assert second_path != first_path
     assert [provider.calls for provider in providers] == [2, 2, 2]
+
+
+async def test_keyword_search_debug_events_cover_provider_candidate_body_and_persistence(
+    tmp_path: Path,
+) -> None:
+    logger, stream = structured_test_logger("tests.search.keyword-events")
+    judge_client = _JudgeClient()
+    invocation = LLMInvocation("judge", "judge-model", {})
+    stages = LLMStages(
+        {"judge": judge_client},
+        judge=invocation,
+        safety=invocation,
+        content_clean=invocation,
+        focus_summary=invocation,
+        logger=logger,
+    )
+    failed = FakeKeywordSearchProvider(
+        "failed",
+        failure=ExecutionFailure(
+            ErrorCode.ALL_PROVIDERS_FAILED,
+            "PROVIDER_FAILURE_DETAIL_SENTINEL",
+        ),
+    )
+    success = FakeKeywordSearchProvider(
+        "success",
+        [
+            KeywordSearchHit("https://example.com/empty?id=1", title=" ", snippet=""),
+            KeywordSearchHit(
+                "https://example.com/no-body?id=42&mode=test",
+                snippet="No body",
+            ),
+            KeywordSearchHit(
+                "https://example.com/space?id=2",
+                snippet="Whitespace body",
+                raw_content="   ",
+            ),
+            KeywordSearchHit(
+                "https://example.com/reject?id=3",
+                snippet="Rejected body",
+                raw_content="reject-body PAGE_REJECT_SENTINEL",
+            ),
+            KeywordSearchHit(
+                "https://example.com/accepted?id=4",
+                snippet="Accepted body",
+                raw_content="PAGE_ACCEPT_SENTINEL",
+            ),
+            KeywordSearchHit(
+                "https://example.com/no-body?id=42&mode=test",
+                snippet="Duplicate later",
+            ),
+        ],
+    )
+    orchestrator = SearchOrchestrator(
+        keyword_providers=[failed, success],
+        llm_invocations=(),
+        quotas=ProviderQuotaManager(
+            web_limits={"failed": 1, "success": 1},
+            llm_limits={},
+        ),
+        stages=stages,
+        store=URLStore(),
+        result_writer=ResultWriter(tmp_path / "debug-results"),
+        logger=logger,
+    )
+
+    with bind_request_id("abcddcba"):
+        result_path = Path(
+            await orchestrator.keyword_search(
+                "QUERY_BODY_SENTINEL",
+                request_id="abcddcba",
+            )
+        )
+
+    records = [
+        json.loads(line) for line in result_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert all(set(record) == {"url", "abstract"} for record in records)
+    assert result_path.name == "keyword-abcddcba.jsonl"
+
+    logged = stream.getvalue()
+    lines = logged.splitlines()
+    assert all("request=abcddcba" in line for line in lines)
+    assert any(
+        "event=provider_failed" in line
+        and "provider=failed" in line
+        and "error_type=ExecutionFailure" in line
+        for line in lines
+    )
+    assert any(
+        "event=provider_completed" in line
+        and "provider=success" in line
+        and "hits=6" in line
+        for line in lines
+    )
+    assert any(
+        "event=candidate_rejected" in line
+        and "url=https://example.com/empty?id=1" in line
+        and "reason=empty_abstract" in line
+        for line in lines
+    )
+    assert "url=https://example.com/no-body?id=42&mode=test" in logged
+    assert any("event=body_skipped" in line and "reason=no_body" in line for line in lines)
+    assert any(
+        "event=body_rejected" in line and "reason=cheap_check" in line for line in lines
+    )
+    assert any(
+        "event=body_rejected" in line
+        and "reason=judge_rejected" in line
+        and "decision_reason=\"not usable\"" in line
+        for line in lines
+    )
+    assert any(
+        "event=body_accepted" in line and "url=https://example.com/accepted?id=4" in line
+        for line in lines
+    )
+    assert any(
+        "event=candidate_rejected" in line
+        and "url=https://example.com/no-body?id=42&mode=test" in line
+        and "reason=duplicate" in line
+        for line in lines
+    )
+    assert any(
+        "event=results_written" in line
+        and "kind=keyword" in line
+        and str(result_path) in line
+        for line in lines
+    )
+    for sentinel in (
+        "QUERY_BODY_SENTINEL",
+        "PAGE_REJECT_SENTINEL",
+        "PAGE_ACCEPT_SENTINEL",
+        "PROVIDER_FAILURE_DETAIL_SENTINEL",
+    ):
+        assert sentinel not in logged

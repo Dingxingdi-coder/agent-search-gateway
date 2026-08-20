@@ -1,9 +1,23 @@
+import asyncio
+from collections.abc import Sequence
+
 import pytest
 
 from agent_search_gateway.errors import ErrorCode, ExecutionFailure
 from agent_search_gateway.llm.stages import LLMStages
 from agent_search_gateway.models import LLMInvocation, StageDecision
+from agent_search_gateway.providers.contracts import ChatMessage
 from tests.support.fakes import FakeLLMClient
+from tests.support.logging import structured_test_logger
+
+
+class _CancelledTextClient(FakeLLMClient):
+    async def complete_text(
+        self,
+        invocation: LLMInvocation,
+        messages: Sequence[ChatMessage],
+    ) -> str:
+        raise asyncio.CancelledError
 
 
 async def test_llm_stages_use_resolved_invocations_and_validate_outputs() -> None:
@@ -80,3 +94,125 @@ async def test_llm_stages_use_resolved_invocations_and_validate_outputs() -> Non
         await stages.focus_summary("content", "topic")
     assert upstream.value is upstream_failure
     assert judge_client.text_calls == []
+
+
+async def test_llm_stage_debug_events_are_semantic_and_payload_safe() -> None:
+    logger, stream = structured_test_logger("tests.llm.semantic-events")
+    judge = LLMInvocation("judge", "judge-model", {})
+    safety = LLMInvocation("safety", "safety-model", {})
+    clean = LLMInvocation("clean", "clean-model", {})
+    focus = LLMInvocation("focus", "focus-model", {})
+    search = LLMInvocation("search", "search-model", {})
+    long_reason = "unsafe\nreason\t" + ("r" * 220)
+    clients = {
+        "judge": FakeLLMClient("judge", json_result={"ok": True, "reason": "useful"}),
+        "safety": FakeLLMClient("safety", json_result={"ok": False, "reason": long_reason}),
+        "clean": FakeLLMClient("clean", text_result="MODEL_CLEAN_BODY_SENTINEL"),
+        "focus": FakeLLMClient("focus", text_result="MODEL_FOCUS_BODY_SENTINEL"),
+        "search": FakeLLMClient("search", text_result="MODEL_SEARCH_BODY_SENTINEL"),
+    }
+    stages = LLMStages(
+        clients,
+        judge=judge,
+        safety=safety,
+        content_clean=clean,
+        focus_summary=focus,
+        logger=logger,
+    )
+
+    assert await stages.judge("PAGE_BODY_SENTINEL") == StageDecision(True, "useful")
+    assert await stages.safety("FINAL_PAGE_SENTINEL") == StageDecision(False, long_reason)
+    assert await stages.content_clean("RAW_PAGE_SENTINEL") == "MODEL_CLEAN_BODY_SENTINEL"
+    assert await stages.focus_summary(
+        "FINAL_PAGE_SENTINEL",
+        "FOCUS_BODY_SENTINEL",
+    ) == "MODEL_FOCUS_BODY_SENTINEL"
+    assert await stages.llm_search_markdown(
+        search,
+        "USER_PROMPT_SENTINEL",
+    ) == "MODEL_SEARCH_BODY_SENTINEL"
+
+    logged = stream.getvalue()
+    lines = logged.splitlines()
+    for stage_name, provider, model in (
+        ("judge", "judge", "judge-model"),
+        ("safety", "safety", "safety-model"),
+        ("content_clean", "clean", "clean-model"),
+        ("focus_summary", "focus", "focus-model"),
+        ("llm_search", "search", "search-model"),
+    ):
+        assert any(
+            "event=llm_stage_started" in line
+            and f"stage={stage_name}" in line
+            and f"provider={provider}" in line
+            and f"model={model}" in line
+            and "input_chars=" in line
+            for line in lines
+        )
+        assert any(
+            "event=llm_stage_completed" in line
+            and f"stage={stage_name}" in line
+            and "elapsed_ms=" in line
+            for line in lines
+        )
+    assert any(
+        "stage=judge" in line and "ok=true" in line and "reason=useful" in line
+        for line in lines
+    )
+    safety_line = next(
+        line for line in lines if "event=llm_stage_completed" in line and "stage=safety" in line
+    )
+    assert "ok=false" in safety_line
+    assert "unsafe reason" in safety_line
+    assert "\\n" not in safety_line
+    assert len(safety_line) < 400
+    assert any("stage=content_clean" in line and "output_chars=25" in line for line in lines)
+    assert any("stage=focus_summary" in line and "focus_present=true" in line for line in lines)
+    assert any("stage=llm_search" in line and "output_chars=26" in line for line in lines)
+
+    for sentinel in (
+        "PAGE_BODY_SENTINEL",
+        "FINAL_PAGE_SENTINEL",
+        "RAW_PAGE_SENTINEL",
+        "FOCUS_BODY_SENTINEL",
+        "USER_PROMPT_SENTINEL",
+        "MODEL_CLEAN_BODY_SENTINEL",
+        "MODEL_FOCUS_BODY_SENTINEL",
+        "MODEL_SEARCH_BODY_SENTINEL",
+    ):
+        assert sentinel not in logged
+
+    clients["search"].failure = ExecutionFailure(
+        ErrorCode.ALL_PROVIDERS_FAILED,
+        "MODEL_FAILURE_DETAIL_SENTINEL",
+    )
+    with pytest.raises(ExecutionFailure):
+        await stages.llm_search_markdown(search, "SECOND_PROMPT_SENTINEL")
+    failure_log = stream.getvalue()
+    assert "event=llm_stage_failed" in failure_log
+    assert "stage=llm_search" in failure_log
+    assert "error_type=ExecutionFailure" in failure_log
+    assert "MODEL_FAILURE_DETAIL_SENTINEL" not in failure_log
+    assert "SECOND_PROMPT_SENTINEL" not in failure_log
+
+
+async def test_llm_stage_cancellation_is_logged_and_reraised_without_payload() -> None:
+    logger, stream = structured_test_logger("tests.llm.cancelled")
+    invocation = LLMInvocation("cancel", "cancel-model", {})
+    stages = LLMStages(
+        {"cancel": _CancelledTextClient("cancel")},
+        judge=invocation,
+        safety=invocation,
+        content_clean=invocation,
+        focus_summary=invocation,
+        logger=logger,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await stages.content_clean("CANCELLED_PAGE_SENTINEL")
+
+    logged = stream.getvalue()
+    assert "event=llm_stage_started" in logged
+    assert "event=llm_stage_cancelled" in logged
+    assert "stage=content_clean" in logged
+    assert "CANCELLED_PAGE_SENTINEL" not in logged

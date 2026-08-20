@@ -1,9 +1,13 @@
 """Provider quotas, singleflight, and keyed serialization primitives."""
 
 import asyncio
+import logging
+import time
 from collections.abc import Awaitable, Callable, Hashable, Mapping
 from dataclasses import dataclass
 from typing import Generic, TypeVar
+
+from .observability import log_event
 
 T = TypeVar("T")
 K = TypeVar("K", bound=Hashable)
@@ -32,12 +36,24 @@ class CapacityLease:
 
 
 class CapacityGate:
-    def __init__(self, limit: int) -> None:
+    def __init__(
+        self,
+        limit: int,
+        *,
+        provider: str | None = None,
+        quota_kind: str | None = None,
+        logger: logging.Logger | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
         if limit <= 0:
             raise ValueError("capacity limit must be positive")
         self.limit = limit
         self.in_use = 0
         self.max_observed_in_use = 0
+        self._provider = provider
+        self._quota_kind = quota_kind
+        self._logger = logger
+        self._monotonic = monotonic
         self._condition = asyncio.Condition()
 
     def lease(self) -> CapacityLease:
@@ -46,29 +62,64 @@ class CapacityGate:
     async def try_lease(self) -> CapacityLease | None:
         async with self._condition:
             if self.in_use >= self.limit:
+                self._log("quota_waiting")
                 return None
-            self._claim()
+            self._claim(waited_ms=0)
             return CapacityLease(self, acquired=True)
 
     async def wait_until_available(self) -> None:
         async with self._condition:
+            if self.in_use >= self.limit:
+                self._log("quota_waiting")
             await self._condition.wait_for(lambda: self.in_use < self.limit)
 
     async def _acquire(self) -> None:
         async with self._condition:
+            started = self._monotonic()
+            waiting = self.in_use >= self.limit
+            if waiting:
+                self._log("quota_waiting")
             await self._condition.wait_for(lambda: self.in_use < self.limit)
-            self._claim()
+            waited_ms = max(0, int((self._monotonic() - started) * 1000)) if waiting else 0
+            self._claim(waited_ms=waited_ms)
 
-    def _claim(self) -> None:
+    def _claim(self, *, waited_ms: int) -> None:
         self.in_use += 1
         self.max_observed_in_use = max(self.max_observed_in_use, self.in_use)
+        self._log("quota_acquired", waited_ms=waited_ms)
 
     async def _release(self) -> None:
         async with self._condition:
             if self.in_use <= 0:
                 raise RuntimeError("capacity lease released more than once")
             self.in_use -= 1
+            self._log("quota_released")
             self._condition.notify_all()
+
+    def _log(self, event: str, *, waited_ms: int | None = None) -> None:
+        if self._logger is None or self._provider is None or self._quota_kind is None:
+            return
+        if waited_ms is None:
+            log_event(
+                self._logger,
+                logging.DEBUG,
+                event,
+                provider=self._provider,
+                quota_kind=self._quota_kind,
+                in_use=self.in_use,
+                limit=self.limit,
+            )
+            return
+        log_event(
+            self._logger,
+            logging.DEBUG,
+            event,
+            provider=self._provider,
+            quota_kind=self._quota_kind,
+            in_use=self.in_use,
+            limit=self.limit,
+            waited_ms=waited_ms,
+        )
 
 
 class ProviderQuotaManager:
@@ -77,9 +128,30 @@ class ProviderQuotaManager:
         *,
         web_limits: Mapping[str, int],
         llm_limits: Mapping[str, int],
+        logger: logging.Logger | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._web = {name: CapacityGate(limit) for name, limit in web_limits.items()}
-        self._llm = {name: CapacityGate(limit) for name, limit in llm_limits.items()}
+        event_logger = logger or logging.getLogger(__name__)
+        self._web = {
+            name: CapacityGate(
+                limit,
+                provider=name,
+                quota_kind="web",
+                logger=event_logger,
+                monotonic=monotonic,
+            )
+            for name, limit in web_limits.items()
+        }
+        self._llm = {
+            name: CapacityGate(
+                limit,
+                provider=name,
+                quota_kind="llm",
+                logger=event_logger,
+                monotonic=monotonic,
+            )
+            for name, limit in llm_limits.items()
+        }
 
     def get_web(self, name: str) -> CapacityGate:
         return self._web[name]
@@ -167,7 +239,14 @@ class SingleflightGroup(Generic[K, T]):
         self._guard = asyncio.Lock()
         self._inflight: dict[K, asyncio.Future[T]] = {}
 
-    async def do(self, key: K, factory: Callable[[], Awaitable[T]]) -> T:
+    async def do(
+        self,
+        key: K,
+        factory: Callable[[], Awaitable[T]],
+        *,
+        on_leader: Callable[[], None] | None = None,
+        on_follower: Callable[[], None] | None = None,
+    ) -> T:
         async with self._guard:
             future = self._inflight.get(key)
             if future is None:
@@ -178,7 +257,11 @@ class SingleflightGroup(Generic[K, T]):
                 leader = False
 
         if not leader:
+            if on_follower is not None:
+                on_follower()
             return await asyncio.shield(future)
+        if on_leader is not None:
+            on_leader()
 
         try:
             result = await factory()

@@ -1,5 +1,6 @@
 """Resolved runtime assembly for the foreground daemon."""
 
+import logging
 from collections.abc import Callable, Mapping
 from typing import cast
 
@@ -9,6 +10,7 @@ from .concurrency import ProviderQuotaManager
 from .config import ResolvedConfig, ResolvedWebProviderConfig
 from .errors import ConfigFailure, ErrorCode
 from .llm.stages import LLMStages
+from .observability import log_event
 from .orchestrators.fetch import FetchOrchestrator
 from .orchestrators.search import SearchOrchestrator
 from .paths import RuntimePaths
@@ -95,7 +97,7 @@ class Runtime:
             scheduler=FetchScheduler(web_fetch, quotas, stages),
             stages=stages,
         )
-        return cls(
+        runtime = cls(
             quotas=quotas,
             web_search_providers=web_search,
             web_fetch_providers=web_fetch,
@@ -105,6 +107,24 @@ class Runtime:
             fetch_orchestrator=fetch_orchestrator,
             web_http_executors=web_executors,
         )
+        log_event(
+            logging.getLogger(__name__),
+            logging.DEBUG,
+            "runtime_built",
+            web_providers=",".join(item.name for item in enabled_web) or "-",
+            web_provider_count=len(enabled_web),
+            llm_providers=",".join(item.name for item in config.llm.providers) or "-",
+            llm_provider_count=len(config.llm.providers),
+            web_limits=",".join(
+                f"{item.name}:{item.max_concurrency}" for item in enabled_web
+            )
+            or "-",
+            llm_limits=",".join(
+                f"{item.name}:{item.max_concurrency}" for item in config.llm.providers
+            )
+            or "-",
+        )
+        return runtime
 
     @classmethod
     def _build_web_providers(

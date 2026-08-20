@@ -47,12 +47,19 @@ def test_example_config_loads_with_stub_secrets_and_readme_commands_match_cli_he
     readme = readme_path.read_text(encoding="utf-8")
     documented = set(
         re.findall(
-            r"^agent-search-gateway (start|stop|keyword-search|llm-search|url-fetch)\b",
+            r"^agent-search-gateway (start|stop|doctor|keyword-search|llm-search|url-fetch)\b",
             readme,
             flags=re.MULTILINE,
         )
     )
-    assert documented == {"start", "stop", "keyword-search", "llm-search", "url-fetch"}
+    assert documented == {
+        "start",
+        "stop",
+        "doctor",
+        "keyword-search",
+        "llm-search",
+        "url-fetch",
+    }
 
     parser = build_parser()
     action = next(item for item in parser._actions if isinstance(item, argparse._SubParsersAction))

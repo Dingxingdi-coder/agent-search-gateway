@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import stat
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from pathlib import Path
@@ -21,11 +22,13 @@ from .models import (
     SuccessResponse,
     URLFetchRequest,
 )
+from .observability import DebugLoggingSession, log_event
 from .paths import RuntimePaths
 from .protocol import NDJSONDecoder, encode_response
 from .providers.defaults import build_default_registry
 from .request_ids import RequestIdFactory, RequestIdRegistry, bind_request_id, generate_request_id
 from .runtime import Runtime
+from .socket_probe import SocketState, probe_unix_socket
 
 _SHUTDOWN_GRACE_SECONDS = 10.0
 _SOCKET_PROBE_TIMEOUT_SECONDS = 2.0
@@ -53,6 +56,7 @@ class RuntimeLike(Protocol):
 
 RuntimeFactory = Callable[[], RuntimeLike]
 ShutdownWaiter = Callable[[tuple[asyncio.Task[object], ...], float], Awaitable[None]]
+MonotonicClock = Callable[[], float]
 
 
 async def _default_shutdown_waiter(
@@ -66,6 +70,16 @@ async def _default_shutdown_waiter(
         raise TimeoutError
 
 
+def _command_name(
+    request: KeywordSearchRequest | LLMSearchRequest | URLFetchRequest,
+) -> str:
+    if isinstance(request, KeywordSearchRequest):
+        return "keyword-search"
+    if isinstance(request, LLMSearchRequest):
+        return "llm-search"
+    return "url-fetch"
+
+
 class ForegroundDaemon:
     def __init__(
         self,
@@ -76,6 +90,9 @@ class ForegroundDaemon:
         logger: logging.Logger | None = None,
         shutdown_waiter: ShutdownWaiter = _default_shutdown_waiter,
         request_id_factory: RequestIdFactory = generate_request_id,
+        debug: bool = False,
+        logging_session: DebugLoggingSession | None = None,
+        monotonic: MonotonicClock = time.monotonic,
     ) -> None:
         self.paths = paths
         self.ready = asyncio.Event()
@@ -85,6 +102,11 @@ class ForegroundDaemon:
         self._runtime_factory = runtime_factory
         self._shutdown_waiter = shutdown_waiter
         self._request_ids = RequestIdRegistry(paths.results_dir, factory=request_id_factory)
+        self._debug = debug
+        self._logging_session = logging_session
+        self._monotonic = monotonic
+        self._session_started = False
+        self._session_stopped = False
         self._runtime: RuntimeLike | None = None
         self._server: asyncio.AbstractServer | None = None
         self._socket_identity: tuple[int, int] | None = None
@@ -117,6 +139,15 @@ class ForegroundDaemon:
                 ) from exc
             socket_stat = self.paths.socket_file.stat()
             self._socket_identity = (socket_stat.st_dev, socket_stat.st_ino)
+            if self._debug:
+                log_event(
+                    self._logger,
+                    logging.INFO,
+                    "session_started",
+                    pid=os.getpid(),
+                    debug=True,
+                )
+                self._session_started = True
             self.ready.set()
             await self.stopped.wait()
         except (asyncio.CancelledError, KeyboardInterrupt):
@@ -125,42 +156,37 @@ class ForegroundDaemon:
 
     async def _prepare_socket_path(self) -> None:
         path = self.paths.socket_file
-        try:
-            existing = path.lstat()
-        except FileNotFoundError:
+        probe = await probe_unix_socket(
+            path,
+            timeout_seconds=_SOCKET_PROBE_TIMEOUT_SECONDS,
+            connector=asyncio.open_unix_connection,
+        )
+        if probe.state is SocketState.MISSING:
             return
-        if not stat.S_ISSOCK(existing.st_mode):
-            return
-
-        identity = (existing.st_dev, existing.st_ino)
-        try:
-            _, writer = await asyncio.wait_for(
-                asyncio.open_unix_connection(path=path),
-                timeout=_SOCKET_PROBE_TIMEOUT_SECONDS,
-            )
-        except FileNotFoundError:
-            return
-        except ConnectionRefusedError:
-            pass
-        except TimeoutError as exc:
-            raise ConfigFailure(
-                ErrorCode.CONFIG_ERROR,
-                f"Daemon socket did not respond in time: {path}",
-            ) from exc
-        except OSError as exc:
-            raise ConfigFailure(
-                ErrorCode.CONFIG_ERROR,
-                f"Unable to inspect daemon socket: {path}",
-            ) from exc
-        else:
-            writer.close()
-            with suppress(ConnectionError, BrokenPipeError):
-                await writer.wait_closed()
+        if probe.state is SocketState.LIVE:
             raise ConfigFailure(
                 ErrorCode.CONFIG_ERROR,
                 f"Daemon is already running at: {path}",
             )
+        if probe.state is SocketState.TIMEOUT:
+            raise ConfigFailure(
+                ErrorCode.CONFIG_ERROR,
+                f"Daemon socket did not respond in time: {path}",
+            )
+        if probe.state is SocketState.NOT_SOCKET:
+            raise ConfigFailure(
+                ErrorCode.CONFIG_ERROR,
+                f"Daemon socket path is not a Unix socket: {path}",
+            )
+        if probe.state is SocketState.OS_ERROR:
+            raise ConfigFailure(
+                ErrorCode.CONFIG_ERROR,
+                f"Unable to inspect daemon socket: {path}",
+            )
 
+        identity = probe.identity
+        if probe.state is not SocketState.REFUSED or identity is None:
+            raise RuntimeError("unexpected daemon socket probe state")
         try:
             current = path.lstat()
         except FileNotFoundError:
@@ -187,6 +213,14 @@ class ForegroundDaemon:
             registry = build_default_registry()
             data = load_toml(self.paths.config_file)
             config = resolve_config(data, registry, self._environ)
+            if self._logging_session is not None:
+                web_secrets = (
+                    provider.secret
+                    for provider in config.web.providers
+                    if provider.secret is not None
+                )
+                llm_secrets = (provider.secret for provider in config.llm.providers)
+                self._logging_session.add_secrets(web_secrets, llm_secrets)
             return Runtime.build(config, self.paths, registry=registry)
         except ConfigFailure:
             raise
@@ -236,53 +270,123 @@ class ForegroundDaemon:
         if not isinstance(request, (KeywordSearchRequest, LLMSearchRequest, URLFetchRequest)):
             return ErrorResponse(ErrorCode.BAD_REQUEST, "Unknown request type")
 
+        is_search = isinstance(request, (KeywordSearchRequest, LLMSearchRequest))
+        with (
+            self._request_ids.reserve(may_write_search_result=is_search) as request_id,
+            bind_request_id(request_id),
+        ):
+            return await self._dispatch_business(request, request_id=request_id)
+
+    async def _dispatch_business(
+        self,
+        request: KeywordSearchRequest | LLMSearchRequest | URLFetchRequest,
+        *,
+        request_id: str,
+    ) -> Response:
+        command = _command_name(request)
+        started = self._monotonic()
+        log_event(self._logger, logging.DEBUG, "workflow_started", command=command)
         current = asyncio.current_task()
         if current is None:
-            return ErrorResponse(ErrorCode.PROTOCOL_ERROR, "Internal daemon error")
-        workflow_task = current
+            return self._internal_workflow_failure(command, started, RuntimeError("missing task"))
+
         async with self._state_lock:
             if self._shutting_down:
+                log_event(
+                    self._logger,
+                    logging.DEBUG,
+                    "workflow_rejected",
+                    command=command,
+                    elapsed_ms=self._elapsed_ms(started),
+                    error_code=ErrorCode.DAEMON_SHUTTING_DOWN.value,
+                )
                 return ErrorResponse(
                     ErrorCode.DAEMON_SHUTTING_DOWN,
                     "Daemon is shutting down",
                 )
-            self._active_workflows.add(workflow_task)
+            self._active_workflows.add(current)
+
         try:
-            is_search = isinstance(request, (KeywordSearchRequest, LLMSearchRequest))
-            with (
-                self._request_ids.reserve(may_write_search_result=is_search) as request_id,
-                bind_request_id(request_id),
-            ):
-                runtime = self._require_runtime()
-                if isinstance(request, KeywordSearchRequest):
-                    text = await runtime.search_orchestrator.keyword_search(
-                        request.query,
-                        request_id=request_id,
-                    )
-                elif isinstance(request, LLMSearchRequest):
-                    text = await runtime.search_orchestrator.llm_search(
-                        request.prompt,
-                        request_id=request_id,
-                    )
-                else:
-                    text = await runtime.fetch_orchestrator.url_fetch(
-                        request.url,
-                        request.focus,
-                    )
-            return SuccessResponse(text)
-        except GatewayError as exc:
-            return ErrorResponse(exc.code, exc.message)
+            text = await self._invoke_workflow(request, request_id=request_id)
         except asyncio.CancelledError:
+            log_event(
+                self._logger,
+                logging.DEBUG,
+                "workflow_cancelled",
+                command=command,
+                elapsed_ms=self._elapsed_ms(started),
+            )
             raise
+        except GatewayError as exc:
+            log_event(
+                self._logger,
+                logging.DEBUG,
+                "workflow_failed",
+                command=command,
+                elapsed_ms=self._elapsed_ms(started),
+                error_code=exc.code.value,
+                error_type=type(exc).__name__,
+            )
+            return ErrorResponse(exc.code, exc.message)
         except Exception as exc:
+            return self._internal_workflow_failure(command, started, exc)
+        else:
+            log_event(
+                self._logger,
+                logging.DEBUG,
+                "workflow_completed",
+                command=command,
+                elapsed_ms=self._elapsed_ms(started),
+            )
+            return SuccessResponse(text)
+        finally:
+            async with self._state_lock:
+                self._active_workflows.discard(current)
+
+    async def _invoke_workflow(
+        self,
+        request: KeywordSearchRequest | LLMSearchRequest | URLFetchRequest,
+        *,
+        request_id: str,
+    ) -> str:
+        runtime = self._require_runtime()
+        if isinstance(request, KeywordSearchRequest):
+            return await runtime.search_orchestrator.keyword_search(
+                request.query,
+                request_id=request_id,
+            )
+        if isinstance(request, LLMSearchRequest):
+            return await runtime.search_orchestrator.llm_search(
+                request.prompt,
+                request_id=request_id,
+            )
+        return await runtime.fetch_orchestrator.url_fetch(request.url, request.focus)
+
+    def _internal_workflow_failure(
+        self,
+        command: str,
+        started: float,
+        exc: Exception,
+    ) -> ErrorResponse:
+        if self._debug:
+            log_event(
+                self._logger,
+                logging.ERROR,
+                "workflow_failed",
+                command=command,
+                elapsed_ms=self._elapsed_ms(started),
+                error_type=type(exc).__name__,
+                exc_info=exc,
+            )
+        else:
             self._logger.error(
                 "unexpected daemon workflow failure type=%s",
                 type(exc).__name__,
             )
-            return ErrorResponse(ErrorCode.PROTOCOL_ERROR, "Internal daemon error")
-        finally:
-            async with self._state_lock:
-                self._active_workflows.discard(workflow_task)
+        return ErrorResponse(ErrorCode.PROTOCOL_ERROR, "Internal daemon error")
+
+    def _elapsed_ms(self, started: float) -> int:
+        return max(0, int((self._monotonic() - started) * 1000))
 
     def _require_runtime(self) -> RuntimeLike:
         if self._runtime is None:
@@ -321,6 +425,7 @@ class ForegroundDaemon:
             self.stopped.set()
 
     async def _cleanup_before_response(self) -> asyncio.AbstractServer | None:
+        self._emit_session_stopped()
         runtime = self._runtime
         self._runtime = None
         if runtime is not None:
@@ -345,6 +450,18 @@ class ForegroundDaemon:
             except OSError:
                 self._logger.error("daemon socket unlink failed")
         return server
+
+    def _emit_session_stopped(self) -> None:
+        if not self._session_started or self._session_stopped:
+            return
+        self._session_stopped = True
+        log_event(
+            self._logger,
+            logging.INFO,
+            "session_stopped",
+            pid=os.getpid(),
+            debug=self._debug,
+        )
 
     def _owns_socket(self, path: Path) -> bool:
         identity = self._socket_identity

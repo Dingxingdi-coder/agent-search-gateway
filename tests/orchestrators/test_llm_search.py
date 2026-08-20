@@ -11,9 +11,11 @@ from agent_search_gateway.llm.stages import LLMStages
 from agent_search_gateway.models import LLMInvocation
 from agent_search_gateway.orchestrators.search import SearchOrchestrator
 from agent_search_gateway.providers.contracts import ChatMessage
+from agent_search_gateway.request_ids import bind_request_id
 from agent_search_gateway.result_writer import ResultWriter
 from agent_search_gateway.url_normalization import normalize_url
 from agent_search_gateway.url_store import URLStore
+from tests.support.logging import structured_test_logger
 
 
 class _SearchClient:
@@ -164,3 +166,95 @@ async def test_llm_search_runs_independent_entries_and_isolates_pipeline_failure
         )
     assert all_failed.value.code is ErrorCode.ALL_PROVIDERS_FAILED
     assert set((tmp_path / "results").glob("llm-*.jsonl")) == before
+
+
+async def test_llm_search_debug_events_cover_invocations_parse_failures_and_persistence(
+    tmp_path: Path,
+) -> None:
+    logger, stream = structured_test_logger("tests.search.llm-events")
+    good = LLMInvocation("good", "safe-good-model", {"temperature": 0.1})
+    malformed = LLMInvocation("malformed", "safe-bad-model", {"top_p": 1})
+    failed = LLMInvocation("failed", "safe-failed-model", {})
+    clients = {
+        "good": _SearchClient(
+            "good",
+            "## Result\nURL: https://example.com/good?id=42\nAbstract: Good\n",
+        ),
+        "malformed": _SearchClient("malformed", "MODEL_MALFORMED_SENTINEL"),
+        "failed": _SearchClient(
+            "failed",
+            failure=ExecutionFailure(
+                ErrorCode.ALL_PROVIDERS_FAILED,
+                "MODEL_FAILURE_SENTINEL",
+            ),
+        ),
+    }
+    fallback = good
+    stages = LLMStages(
+        clients,
+        judge=fallback,
+        safety=fallback,
+        content_clean=fallback,
+        focus_summary=fallback,
+        logger=logger,
+    )
+    orchestrator = SearchOrchestrator(
+        keyword_providers=(),
+        llm_invocations=(good, malformed, failed),
+        quotas=ProviderQuotaManager(web_limits={}, llm_limits={}),
+        stages=stages,
+        store=URLStore(),
+        result_writer=ResultWriter(tmp_path / "llm-debug-results"),
+        logger=logger,
+    )
+
+    with bind_request_id("deadc0de"):
+        path = Path(
+            await orchestrator.llm_search(
+                "USER_PROMPT_SENTINEL",
+                request_id="deadc0de",
+            )
+        )
+
+    assert path.name == "llm-deadc0de.jsonl"
+    assert [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] == [
+        {"url": "https://example.com/good?id=42", "abstract": "Good"}
+    ]
+    logged = stream.getvalue()
+    lines = logged.splitlines()
+    assert all("request=deadc0de" in line for line in lines)
+    assert any(
+        "event=provider_completed" in line
+        and "provider=good" in line
+        and "model=safe-good-model" in line
+        and "stage=llm_search" in line
+        and "output_chars=" in line
+        and "results=1" in line
+        for line in lines
+    )
+    assert any(
+        "event=provider_failed" in line
+        and "provider=malformed" in line
+        and "error_type=ParserFailure" in line
+        for line in lines
+    )
+    assert any(
+        "event=provider_failed" in line
+        and "provider=failed" in line
+        and "error_type=ExecutionFailure" in line
+        for line in lines
+    )
+    assert any(
+        "event=results_written" in line
+        and "kind=llm" in line
+        and "results=1" in line
+        and str(path) in line
+        for line in lines
+    )
+    assert "https://example.com/good?id=42" not in logged
+    for sentinel in (
+        "USER_PROMPT_SENTINEL",
+        "MODEL_MALFORMED_SENTINEL",
+        "MODEL_FAILURE_SENTINEL",
+    ):
+        assert sentinel not in logged

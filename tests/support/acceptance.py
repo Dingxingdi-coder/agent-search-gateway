@@ -106,3 +106,87 @@ class AcceptanceRuntime:
 
 def build_acceptance_runtime(paths: RuntimePaths) -> AcceptanceRuntime:
     return AcceptanceRuntime(paths)
+
+
+DEBUG_QUERY_SENTINEL = "DEBUG_QUERY_SENTINEL"
+DEBUG_PAGE_ACCEPT_SENTINEL = "DEBUG_PAGE_ACCEPT_SENTINEL"
+DEBUG_PAGE_REJECT_SENTINEL = "DEBUG_PAGE_REJECT_SENTINEL"
+DEBUG_MODEL_RESPONSE_SENTINEL = "DEBUG_MODEL_RESPONSE_SENTINEL"
+DEBUG_CREDENTIAL_SENTINEL = "DEBUG_CREDENTIAL_SENTINEL"
+
+
+class _DebugAcceptanceLLMClient:
+    name = "judge"
+
+    async def complete_json(
+        self,
+        invocation: LLMInvocation,
+        messages: Sequence[ChatMessage],
+    ) -> Mapping[str, object]:
+        rendered = "\n".join(value for message in messages for value in message.values())
+        if DEBUG_PAGE_REJECT_SENTINEL in rendered:
+            return {"ok": False, "reason": "judge rejected test body"}
+        return {"ok": True, "reason": "accepted"}
+
+    async def complete_text(
+        self,
+        invocation: LLMInvocation,
+        messages: Sequence[ChatMessage],
+    ) -> str:
+        return DEBUG_MODEL_RESPONSE_SENTINEL
+
+    async def aclose(self) -> None:
+        return None
+
+
+class DebugAcceptanceRuntime:
+    def __init__(self, paths: RuntimePaths) -> None:
+        store = URLStore()
+        self.keyword_provider = FakeKeywordSearchProvider(
+            "keyword",
+            [
+                KeywordSearchHit(
+                    url="https://example.com/accepted?id=42&mode=test",
+                    title="Accepted",
+                    snippet="Accepted abstract",
+                    raw_content=DEBUG_PAGE_ACCEPT_SENTINEL,
+                ),
+                KeywordSearchHit(
+                    url="https://example.com/rejected?id=43&mode=test",
+                    title="Rejected body",
+                    snippet="Rejected abstract",
+                    raw_content=DEBUG_PAGE_REJECT_SENTINEL,
+                ),
+            ],
+        )
+        quotas = ProviderQuotaManager(web_limits={"keyword": 2}, llm_limits={})
+        invocation = LLMInvocation("judge", "judge-model", {})
+        stages = LLMStages(
+            {"judge": _DebugAcceptanceLLMClient()},
+            judge=invocation,
+            safety=invocation,
+            content_clean=invocation,
+            focus_summary=invocation,
+        )
+        self.search_orchestrator = SearchOrchestrator(
+            keyword_providers=[self.keyword_provider],
+            llm_invocations=(),
+            quotas=quotas,
+            stages=stages,
+            store=store,
+            result_writer=ResultWriter(paths.results_dir),
+        )
+        self.fetch_orchestrator = FetchOrchestrator(
+            store=store,
+            scheduler=FetchScheduler([], quotas, stages),
+            stages=stages,
+        )
+        self.close_calls = 0
+        self.credential_sentinel = DEBUG_CREDENTIAL_SENTINEL
+
+    async def aclose(self) -> None:
+        self.close_calls += 1
+
+
+def build_debug_acceptance_runtime(paths: RuntimePaths) -> DebugAcceptanceRuntime:
+    return DebugAcceptanceRuntime(paths)

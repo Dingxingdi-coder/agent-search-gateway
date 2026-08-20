@@ -10,6 +10,7 @@ from agent_search_gateway.providers.contracts import ProviderCapabilities
 from agent_search_gateway.providers.defaults import build_default_registry
 from agent_search_gateway.providers.registry import WebProviderRegistration
 from agent_search_gateway.runtime import Runtime
+from tests.support.logging import structured_test_logger
 
 
 class _CountingAsyncClient(httpx.AsyncClient):
@@ -99,7 +100,7 @@ async def test_runtime_assembly_builds_enabled_adapters_with_shared_quotas_and_c
         ("tinyfish", True, True),
     ]
     environment = {
-        "ENV_A": "x",
+        "ENV_A": "RUNTIME_CREDENTIAL_SENTINEL",
         "ENV_B": "x",
         "ENV_C": "x",
         "ENV_D": "x",
@@ -113,6 +114,7 @@ async def test_runtime_assembly_builds_enabled_adapters_with_shared_quotas_and_c
         clients.append(client)
         return client
 
+    _logger, stream = structured_test_logger("agent_search_gateway.runtime")
     runtime = Runtime.build(
         resolved,
         RuntimePaths.from_home(tmp_path),
@@ -133,7 +135,18 @@ async def test_runtime_assembly_builds_enabled_adapters_with_shared_quotas_and_c
     assert runtime.quotas.get_web("tinyfish").limit == 4
     assert runtime.quotas.get_llm("primary").limit == 2
     assert runtime.quotas.get_llm("secondary").limit == 5
-    assert "x" not in repr(runtime)
+    assert "RUNTIME_CREDENTIAL_SENTINEL" not in repr(runtime)
+
+    logged = stream.getvalue()
+    assert "event=runtime_built" in logged
+    assert "web_provider_count=3" in logged
+    assert "web_providers=tavily,brave,tinyfish" in logged
+    assert "llm_provider_count=2" in logged
+    assert "llm_providers=primary,secondary" in logged
+    assert "web_limits=tavily:3,brave:3,tinyfish:4" in logged
+    assert "llm_limits=primary:2,secondary:5" in logged
+    assert "RUNTIME_CREDENTIAL_SENTINEL" not in logged
+    assert "ENV_A" not in logged
 
     await runtime.aclose()
     assert len(clients) == 5
