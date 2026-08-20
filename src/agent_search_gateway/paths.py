@@ -10,6 +10,14 @@ class RuntimePaths:
     socket_file: Path
     results_dir: Path
 
+    @property
+    def logs_dir(self) -> Path:
+        return self.socket_file.parent / "logs"
+
+    @property
+    def debug_log_file(self) -> Path:
+        return self.logs_dir / "debug.log"
+
     @classmethod
     def from_home(cls, home: Path) -> "RuntimePaths":
         return cls(
