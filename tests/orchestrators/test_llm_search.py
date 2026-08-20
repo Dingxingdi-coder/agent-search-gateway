@@ -88,11 +88,11 @@ async def test_llm_search_runs_independent_entries_and_isolates_pipeline_failure
     tmp_path: Path,
 ) -> None:
     with pytest.raises(InputFailure) as empty:
-        await _orchestrator(tmp_path, (), {}).llm_search("  ")
+        await _orchestrator(tmp_path, (), {}).llm_search("  ", request_id="00000011")
     assert empty.value.code is ErrorCode.EMPTY_QUERY
 
     with pytest.raises(ExecutionFailure) as absent:
-        await _orchestrator(tmp_path, (), {}).llm_search("find")
+        await _orchestrator(tmp_path, (), {}).llm_search("find", request_id="00000012")
     assert absent.value.code is ErrorCode.NO_LLM_SEARCH_PROVIDERS
 
     release_first = asyncio.Event()
@@ -132,7 +132,7 @@ async def test_llm_search_runs_independent_entries_and_isolates_pipeline_failure
     store = URLStore()
     orchestrator = _orchestrator(tmp_path, invocations, clients, store)
 
-    first_path = Path(await orchestrator.llm_search(" find docs "))
+    first_path = Path(await orchestrator.llm_search(" find docs ", request_id="11111111"))
     output = [json.loads(line) for line in first_path.read_text(encoding="utf-8").splitlines()]
     assert output == [
         {"url": "https://example.com/a", "abstract": "First"},
@@ -143,7 +143,7 @@ async def test_llm_search_runs_independent_entries_and_isolates_pipeline_failure
     stored_a = store.get(normalize_url("https://example.com/a"))
     assert stored_a is not None and stored_a.abstract == "First" and stored_a.raw_content == ""
 
-    second_path = Path(await orchestrator.llm_search("find docs"))
+    second_path = Path(await orchestrator.llm_search("find docs", request_id="22222222"))
     assert second_path != first_path
 
     all_failed_invocations = (
@@ -159,6 +159,8 @@ async def test_llm_search_runs_independent_entries_and_isolates_pipeline_failure
     }
     before = set((tmp_path / "results").glob("llm-*.jsonl"))
     with pytest.raises(ExecutionFailure) as all_failed:
-        await _orchestrator(tmp_path, all_failed_invocations, all_failed_clients).llm_search("x")
+        await _orchestrator(tmp_path, all_failed_invocations, all_failed_clients).llm_search(
+            "x", request_id="00000013"
+        )
     assert all_failed.value.code is ErrorCode.ALL_PROVIDERS_FAILED
     assert set((tmp_path / "results").glob("llm-*.jsonl")) == before

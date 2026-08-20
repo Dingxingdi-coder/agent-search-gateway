@@ -24,6 +24,7 @@ from .models import (
 from .paths import RuntimePaths
 from .protocol import NDJSONDecoder, encode_response
 from .providers.defaults import build_default_registry
+from .request_ids import RequestIdFactory, RequestIdRegistry, bind_request_id, generate_request_id
 from .runtime import Runtime
 
 _SHUTDOWN_GRACE_SECONDS = 10.0
@@ -31,9 +32,9 @@ _SOCKET_PROBE_TIMEOUT_SECONDS = 2.0
 
 
 class _SearchOrchestratorLike(Protocol):
-    async def keyword_search(self, query: str) -> str: ...
+    async def keyword_search(self, query: str, *, request_id: str) -> str: ...
 
-    async def llm_search(self, prompt: str) -> str: ...
+    async def llm_search(self, prompt: str, *, request_id: str) -> str: ...
 
 
 class _FetchOrchestratorLike(Protocol):
@@ -74,6 +75,7 @@ class ForegroundDaemon:
         environ: Mapping[str, str] | None = None,
         logger: logging.Logger | None = None,
         shutdown_waiter: ShutdownWaiter = _default_shutdown_waiter,
+        request_id_factory: RequestIdFactory = generate_request_id,
     ) -> None:
         self.paths = paths
         self.ready = asyncio.Event()
@@ -82,6 +84,7 @@ class ForegroundDaemon:
         self._environ = dict(os.environ if environ is None else environ)
         self._runtime_factory = runtime_factory
         self._shutdown_waiter = shutdown_waiter
+        self._request_ids = RequestIdRegistry(paths.results_dir, factory=request_id_factory)
         self._runtime: RuntimeLike | None = None
         self._server: asyncio.AbstractServer | None = None
         self._socket_identity: tuple[int, int] | None = None
@@ -230,6 +233,8 @@ class ForegroundDaemon:
             await self._begin_shutdown()
             await self._shutdown_response_ready.wait()
             return SuccessResponse("Daemon stopped.")
+        if not isinstance(request, (KeywordSearchRequest, LLMSearchRequest, URLFetchRequest)):
+            return ErrorResponse(ErrorCode.BAD_REQUEST, "Unknown request type")
 
         current = asyncio.current_task()
         if current is None:
@@ -243,15 +248,27 @@ class ForegroundDaemon:
                 )
             self._active_workflows.add(workflow_task)
         try:
-            runtime = self._require_runtime()
-            if isinstance(request, KeywordSearchRequest):
-                text = await runtime.search_orchestrator.keyword_search(request.query)
-            elif isinstance(request, LLMSearchRequest):
-                text = await runtime.search_orchestrator.llm_search(request.prompt)
-            elif isinstance(request, URLFetchRequest):
-                text = await runtime.fetch_orchestrator.url_fetch(request.url, request.focus)
-            else:
-                return ErrorResponse(ErrorCode.BAD_REQUEST, "Unknown request type")
+            is_search = isinstance(request, (KeywordSearchRequest, LLMSearchRequest))
+            with (
+                self._request_ids.reserve(may_write_search_result=is_search) as request_id,
+                bind_request_id(request_id),
+            ):
+                runtime = self._require_runtime()
+                if isinstance(request, KeywordSearchRequest):
+                    text = await runtime.search_orchestrator.keyword_search(
+                        request.query,
+                        request_id=request_id,
+                    )
+                elif isinstance(request, LLMSearchRequest):
+                    text = await runtime.search_orchestrator.llm_search(
+                        request.prompt,
+                        request_id=request_id,
+                    )
+                else:
+                    text = await runtime.fetch_orchestrator.url_fetch(
+                        request.url,
+                        request.focus,
+                    )
             return SuccessResponse(text)
         except GatewayError as exc:
             return ErrorResponse(exc.code, exc.message)

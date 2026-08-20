@@ -159,7 +159,7 @@ async def test_keyword_search_validates_body_then_commits_deterministic_first_wr
         result_writer=ResultWriter(tmp_path / "results"),
     )
 
-    first_path = Path(await orchestrator.keyword_search("query"))
+    first_path = Path(await orchestrator.keyword_search("query", request_id="11111111"))
     output = [json.loads(line) for line in first_path.read_text(encoding="utf-8").splitlines()]
     assert output == [
         {"url": "https://example.com/a", "abstract": "First abstract"},
@@ -180,6 +180,6 @@ async def test_keyword_search_validates_body_then_commits_deterministic_first_wr
     assert store.get(normalize_url("https://example.com/c")) is None
     assert "explode-body-unavailable-must-be-skipped" not in "\n".join(judge_client.candidates)
 
-    second_path = Path(await orchestrator.keyword_search("query"))
+    second_path = Path(await orchestrator.keyword_search("query", request_id="22222222"))
     assert second_path != first_path
     assert [provider.calls for provider in providers] == [2, 2, 2]

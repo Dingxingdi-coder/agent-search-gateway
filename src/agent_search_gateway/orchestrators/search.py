@@ -10,6 +10,7 @@ from ..llm.stages import LLMStages, cheap_check
 from ..llm_search_parser import parse_search_markdown
 from ..models import LLMInvocation, SearchRecord
 from ..providers.contracts import KeywordSearchHit, KeywordSearchProvider
+from ..request_ids import validate_request_id
 from ..result_writer import ResultWriter
 from ..url_normalization import NormalizedURL, normalize_url
 from ..url_store import URLStore
@@ -41,7 +42,8 @@ class SearchOrchestrator:
         self._store = store
         self._result_writer = result_writer
 
-    async def keyword_search(self, query: str) -> str:
+    async def keyword_search(self, query: str, *, request_id: str) -> str:
+        validate_request_id(request_id)
         normalized_query = query.strip()
         if not normalized_query:
             raise InputFailure(ErrorCode.EMPTY_QUERY, "Query must not be empty")
@@ -82,9 +84,12 @@ class SearchOrchestrator:
                     ordered_urls.append(staged.url)
 
         records = [self._record_from_store(url) for url in ordered_urls]
-        return str(self._result_writer.write_results("keyword", records))
+        return str(
+            self._result_writer.write_results("keyword", records, request_id=request_id)
+        )
 
-    async def llm_search(self, prompt: str) -> str:
+    async def llm_search(self, prompt: str, *, request_id: str) -> str:
+        validate_request_id(request_id)
         normalized_prompt = prompt.strip()
         if not normalized_prompt:
             raise InputFailure(ErrorCode.EMPTY_QUERY, "Prompt must not be empty")
@@ -118,7 +123,7 @@ class SearchOrchestrator:
                     seen.add(result.url)
                     ordered_urls.append(result.url)
         records = [self._record_from_store(url) for url in ordered_urls]
-        return str(self._result_writer.write_results("llm", records))
+        return str(self._result_writer.write_results("llm", records, request_id=request_id))
 
     async def _run_llm_pipeline(
         self,

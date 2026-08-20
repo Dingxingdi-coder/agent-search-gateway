@@ -20,14 +20,14 @@ from agent_search_gateway.protocol import send_request
 
 
 class _FakeSearch:
-    async def keyword_search(self, query: str) -> str:
+    async def keyword_search(self, query: str, *, request_id: str) -> str:
         if query == "typed-failure":
             raise ExecutionFailure(ErrorCode.ALL_PROVIDERS_FAILED, "typed failure")
         if query == "unexpected":
             raise RuntimeError("sensitive unexpected detail")
         return f"keyword:{query}"
 
-    async def llm_search(self, prompt: str) -> str:
+    async def llm_search(self, prompt: str, *, request_id: str) -> str:
         return f"llm:{prompt}"
 
 
