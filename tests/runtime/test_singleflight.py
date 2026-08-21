@@ -143,6 +143,41 @@ async def test_singleflight_role_callbacks_run_in_each_callers_request_context()
     assert current_request_id() is None
 
 
+async def test_singleflight_role_callback_failures_do_not_alter_shared_execution() -> None:
+    group: SingleflightGroup[str, str] = SingleflightGroup()
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    leader_called = asyncio.Event()
+    follower_called = asyncio.Event()
+    calls = 0
+
+    async def factory() -> str:
+        nonlocal calls
+        calls += 1
+        entered.set()
+        await release.wait()
+        return "shared"
+
+    def failing_leader() -> None:
+        leader_called.set()
+        raise RuntimeError("leader callback failure")
+
+    def failing_follower() -> None:
+        follower_called.set()
+        raise RuntimeError("follower callback failure")
+
+    first = asyncio.create_task(group.do("key", factory, on_leader=failing_leader))
+    await leader_called.wait()
+    await entered.wait()
+    second = asyncio.create_task(group.do("key", factory, on_follower=failing_follower))
+    await follower_called.wait()
+    release.set()
+
+    assert tuple(await asyncio.gather(first, second)) == ("shared", "shared")
+    assert calls == 1
+    assert await group.do("key", lambda: _return_value("after")) == "after"
+
+
 async def test_singleflight_cleans_up_after_cancellation() -> None:
     group: SingleflightGroup[str, str] = SingleflightGroup()
     entered = asyncio.Event()

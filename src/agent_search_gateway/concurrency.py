@@ -257,11 +257,9 @@ class SingleflightGroup(Generic[K, T]):
                 leader = False
 
         if not leader:
-            if on_follower is not None:
-                on_follower()
+            self._run_role_callback(on_follower)
             return await asyncio.shield(future)
-        if on_leader is not None:
-            on_leader()
+        self._run_role_callback(on_leader)
 
         try:
             result = await factory()
@@ -277,6 +275,15 @@ class SingleflightGroup(Generic[K, T]):
             return result
         finally:
             await self._cleanup(key, future)
+
+    @staticmethod
+    def _run_role_callback(callback: Callable[[], None] | None) -> None:
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception:
+            return
 
     async def _cleanup(self, key: K, future: asyncio.Future[T]) -> None:
         async with self._guard:
