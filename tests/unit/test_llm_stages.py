@@ -103,7 +103,7 @@ async def test_llm_stage_debug_events_are_semantic_and_payload_safe() -> None:
     clean = LLMInvocation("clean", "clean-model", {})
     focus = LLMInvocation("focus", "focus-model", {})
     search = LLMInvocation("search", "search-model", {})
-    long_reason = "unsafe\nreason\t" + ("r" * 220)
+    long_reason = "MODEL_DECISION_REASON_SENTINEL unsafe\nreason\t" + ("r" * 220)
     clients = {
         "judge": FakeLLMClient("judge", json_result={"ok": True, "reason": "useful"}),
         "safety": FakeLLMClient("safety", json_result={"ok": False, "reason": long_reason}),
@@ -156,16 +156,16 @@ async def test_llm_stage_debug_events_are_semantic_and_payload_safe() -> None:
             for line in lines
         )
     assert any(
-        "stage=judge" in line and "ok=true" in line and "reason=useful" in line
+        "stage=judge" in line and "ok=true" in line and "reason_present=true" in line
         for line in lines
     )
     safety_line = next(
         line for line in lines if "event=llm_stage_completed" in line and "stage=safety" in line
     )
     assert "ok=false" in safety_line
-    assert "unsafe reason" in safety_line
-    assert "\\n" not in safety_line
-    assert len(safety_line) < 400
+    assert "reason_present=true" in safety_line
+    assert "MODEL_DECISION_REASON_SENTINEL" not in logged
+    assert "reason=useful" not in logged
     assert any("stage=content_clean" in line and "output_chars=25" in line for line in lines)
     assert any("stage=focus_summary" in line and "focus_present=true" in line for line in lines)
     assert any("stage=llm_search" in line and "output_chars=26" in line for line in lines)

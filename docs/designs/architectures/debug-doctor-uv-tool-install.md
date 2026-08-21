@@ -24,7 +24,8 @@
 #### Assumptions
 - The daemon remains a foreground Unix-socket process.
 - `keyword-search`, `llm-search`, and `url-fetch` are the business workflows that receive request IDs; `start`/`stop` remain lifecycle/control operations.
-- Target URLs may be logged in full in debug mode, including query values, per the chosen diagnostic trade-off.
+- Target URLs may retain path, query values, and fragments in debug mode, per the chosen diagnostic trade-off, but URI userinfo is stripped before logging.
+- HTTP `endpoint` fields strip URI userinfo, query, and fragment so request-specific query/prompt data is not persisted as transport metadata.
 - Authentication headers and secret values must never be intentionally logged.
 - Normal mode does not create or append the debug log file.
 - `doctor` treats "daemon not running" as informational, not a failure.
@@ -94,9 +95,9 @@ The feature extends the existing foreground-daemon architecture rather than chan
 
 ##### One Request ID Per Business Workflow
 
-- Description: On daemon dispatch of `keyword-search`, `llm-search`, or `url-fetch`, generate `secrets.token_hex(4)` once and bind it to a request-scoped logging context until that workflow completes.
-- Rationale: Eight hex characters preserve the current filename token shape while giving concurrent logs a stable correlation key.
-- Trade-offs: 32 bits is not intended as a globally unique identifier across machines or permanent archives; it is sufficient for bounded local diagnostic correlation and existing collision handling can remain defensive.
+- Description: On daemon dispatch of `keyword-search`, `llm-search`, or `url-fetch`, reserve an eight-hex ID through `RequestIdRegistry`. The registry rejects active IDs and, for search workflows, IDs colliding with existing `keyword-<id>.jsonl` or `llm-<id>.jsonl` files before the workflow is logged. The accepted ID is then bound to request-scoped logging context until that workflow completes.
+- Rationale: Eight hex characters preserve the current filename token shape while giving concurrent logs a stable correlation key; reservation preserves the one-request/one-result-file invariant even under rare collisions.
+- Trade-offs: 32 bits is not intended as a globally unique identifier across machines or permanent archives; bounded regeneration plus exclusive result-file creation provides local collision defense.
 - Rejected Alternatives:
   - UUIDs:
     - Why Rejected: Longer and less readable for a local bounded log/result namespace.
@@ -143,7 +144,7 @@ The feature extends the existing foreground-daemon architecture rather than chan
 
 ##### Record Operational Metadata, Not Payload Bodies
 
-- Description: Provider/LLM debug events may include provider name, stage, model, URL, attempt, HTTP status, elapsed time, counts, character lengths, `extra_body` keys, parse/decision outcome, and failure category. Do not log query/prompt/page/candidate/LLM-response bodies.
+- Description: Provider/LLM debug events may include provider name, stage, model, sanitized endpoint, target URL, attempt, HTTP status, elapsed time, counts, character lengths, `extra_body` keys, parse/decision booleans or fixed outcome codes, and failure category. Do not log query/prompt/page/candidate/LLM-response bodies or free-form LLM decision reasons.
 - Rationale: These fields explain execution behavior while avoiding huge logs and unnecessary persistence of user/web content.
 - Trade-offs: Prompt-construction bugs cannot be diagnosed from logs alone; prompt builders remain testable directly.
 - Rejected Alternatives:
@@ -175,11 +176,11 @@ The feature extends the existing foreground-daemon architecture rather than chan
 
 #### Security
 
-##### Full Target URLs Are Allowed in Debug Mode
+##### Target URL Query/Fragment Diagnostics Are Allowed, but Userinfo Is Not
 
-- Description: Log target URLs including query values when relevant to provider/candidate/fetch events.
-- Rationale: The chosen debugging policy favors exact URL reproducibility over defensive query redaction.
-- Trade-offs: Signed/session-bearing URLs can be persisted in `debug.log`; users must treat debug logs as potentially sensitive local artifacts.
+- Description: Log target URL path, query, and fragment when relevant to provider/candidate/fetch events, after stripping URI userinfo. HTTP transport `endpoint` fields additionally strip query and fragment so dynamic request parameters such as search queries are not persisted as endpoint metadata.
+- Rationale: The chosen debugging policy favors target-URL reproducibility while treating embedded authentication and transport request parameters as a separate secret/payload boundary.
+- Trade-offs: Signed/session-bearing target URL query values can still be persisted in `debug.log`; users must treat debug logs as potentially sensitive local artifacts.
 
 ##### Debug File Creation Is Fail-Closed
 
@@ -222,9 +223,10 @@ The feature extends the existing foreground-daemon architecture rather than chan
 | Component | Purpose | Key Responsibilities | Public Interfaces | Dependencies | Owns State? | Data-Flow Role |
 |---|---|---|---|---|---|---|
 | CLI Parser | Expose startup/debug/doctor commands | Parse `start --debug`, `doctor`, existing business commands | `agent-search-gateway ...` | argparse | No | Source / renderer |
-| Observability Configuration | Configure project logging | Set project namespace level, stderr handler, rotating file handler, formatter, secret filters | internal `configure_logging(...)` / teardown helper | logging, `RotatingFileHandler`, RuntimePaths | Yes, process logging handlers | Boundary / sink configuration |
-| Request Context | Correlate concurrent workflow logs | Generate/bind/reset current request ID and expose it to log records | internal context manager/accessor | `contextvars`, `secrets` | Yes, task-local context | Metadata carrier |
-| Foreground Daemon | Own request lifecycle | Generate request ID, bind request context, dispatch workflows, log session/workflow lifecycle | existing daemon request handler | observability, runtime | Yes, daemon lifecycle | Coordinator |
+| Observability Configuration | Configure project logging | Set project namespace level, stderr handler, rotating file handler, formatter, secret filters | internal `configure_debug_logging(...)` / teardown helper | logging, `RotatingFileHandler`, RuntimePaths | Yes, process logging handlers | Boundary / sink configuration |
+| Request ID Registry | Reserve collision-safe request IDs | Validate generated IDs, reject active/result-file collisions, reserve and release accepted IDs | internal `RequestIdRegistry.reserve(...)` | `secrets`, RuntimePaths/results | Yes, active request IDs | Operational state guard |
+| Request Context | Correlate concurrent workflow logs | Bind/reset an already-reserved request ID and expose it to log records | internal context manager/accessor | `contextvars` | Yes, task-local context | Metadata carrier |
+| Foreground Daemon | Own request lifecycle | Reserve request ID, bind request context, dispatch workflows, log session/workflow lifecycle, release reservation | existing daemon request handler | request ID registry, observability, runtime | Yes, daemon lifecycle | Coordinator |
 | Search Orchestrator | Run search pipelines | Provider fan-out, candidate decisions, result aggregation, pass request ID to writer | internal `keyword_search`, `llm_search` | quotas, stages, store, writer | No | Coordinator |
 | Fetch Orchestrator | Run admitted URL workflow | Singleflight/locking, fetch preparation, safety/focus stages, decision logging | internal `url_fetch` | store, scheduler, stages | No | Coordinator |
 | Fetch Scheduler | Choose fetch providers | Capacity-aware selection, fallback, semantic/execution outcomes | `fetch_until_accepted` | quotas, stages, providers | No | Scheduler |
@@ -276,8 +278,10 @@ CLI:
 
 Foreground Daemon:
   decode request
-  request_id = secrets.token_hex(4)
-  bind RequestContext(request_id)
+  reserve request_id through RequestIdRegistry
+    reject active IDs
+    for search, reject IDs colliding with existing keyword-/llm- result files
+  bind RequestContext(request_id) only after reservation succeeds
   log workflow started
 
   try:
@@ -313,6 +317,7 @@ Foreground Daemon:
     return existing internal protocol error
   finally:
     reset RequestContext
+    release RequestIdRegistry reservation
 
 CLI:
   print absolute path exactly as before
@@ -324,7 +329,8 @@ CLI:
 CLI -> existing URLFetchRequest -> daemon
 
 Daemon:
-  generate/bind request_id
+  reserve request_id through RequestIdRegistry (active-ID collision check)
+  bind request context after reservation
   log workflow start
 
 Fetch Orchestrator:
@@ -348,7 +354,7 @@ Fetch Orchestrator:
 Daemon:
   log workflow completed/failure
   return existing response envelope
-  reset request context
+  reset request context and release RequestIdRegistry reservation in cleanup
 ```
 
 #### 5.4 `agent-search-gateway doctor`
@@ -428,7 +434,7 @@ Required conventions:
 - Daemon lifecycle events use no business request ID.
 - Provider events include `provider=<name>`.
 - LLM events include semantic `stage=<judge|safety|content_clean|focus_summary|llm_search>` and may include `model=<name>`.
-- Candidate events include `url=<full target URL>` and `event=<accepted|rejected>` plus a stable `reason` when rejected.
+- Candidate events include `url=<target URL path/query/fragment with userinfo stripped>` and `event=<accepted|rejected>` plus a stable fixed `reason` when rejected.
 - No prompt/page/candidate/LLM-response body fields.
 - No authentication secret values.
 

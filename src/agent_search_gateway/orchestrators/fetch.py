@@ -8,7 +8,7 @@ from ..concurrency import PerKeyLockPool, SingleflightGroup
 from ..errors import UNAVAILABLE_MESSAGE, ErrorCode, ExecutionFailure, InputFailure
 from ..llm.stages import LLMStages
 from ..models import URLRecord
-from ..observability import log_event, normalize_log_reason
+from ..observability import elapsed_ms, log_event, target_url_for_log
 from ..scheduler.fetch import FetchScheduler
 from ..url_normalization import NormalizedURL, normalize_url
 from ..url_store import URLStore
@@ -47,7 +47,7 @@ class FetchOrchestrator:
                 self._logger,
                 logging.DEBUG,
                 "singleflight_leader",
-                url=str(normalized_url),
+                url=target_url_for_log(str(normalized_url)),
                 focus_present=focus_present,
                 focus_chars=focus_chars,
             ),
@@ -55,7 +55,7 @@ class FetchOrchestrator:
                 self._logger,
                 logging.DEBUG,
                 "singleflight_joined",
-                url=str(normalized_url),
+                url=target_url_for_log(str(normalized_url)),
                 focus_present=focus_present,
                 focus_chars=focus_chars,
             ),
@@ -72,8 +72,8 @@ class FetchOrchestrator:
                 self._logger,
                 logging.DEBUG,
                 "url_lock_acquired",
-                url=str(normalized_url),
-                wait_ms=max(0, int((self._monotonic() - lock_started) * 1000)),
+                url=target_url_for_log(str(normalized_url)),
+                wait_ms=elapsed_ms(self._monotonic, lock_started),
             )
             snapshot = self._store.get(normalized_url)
             if snapshot is None:
@@ -132,7 +132,7 @@ class FetchOrchestrator:
                 self._logger,
                 logging.DEBUG,
                 "body_accepted",
-                url=str(url),
+                url=target_url_for_log(str(url)),
                 reason="provider_fetch",
                 raw_chars=len(candidate.raw_content),
                 content_chars=len(candidate.content),
@@ -148,7 +148,7 @@ class FetchOrchestrator:
                 self._logger,
                 logging.DEBUG,
                 "body_accepted",
-                url=str(url),
+                url=target_url_for_log(str(url)),
                 reason="content_cleaned",
                 content_chars=len(cleaned),
             )
@@ -174,11 +174,7 @@ class FetchOrchestrator:
         if decision.ok:
             return True
         self._store.mark_unavailable(url)
-        self._log_rejected(
-            url,
-            "safety_rejected",
-            decision_reason=normalize_log_reason(decision.reason),
-        )
+        self._log_rejected(url, "safety_rejected")
         return False
 
     async def _focus_summary(self, content: str, focus: str) -> str:
@@ -195,33 +191,17 @@ class FetchOrchestrator:
             self._logger,
             logging.DEBUG,
             "body_skipped",
-            url=str(url),
+            url=target_url_for_log(str(url)),
             reason=reason,
         )
 
-    def _log_rejected(
-        self,
-        url: NormalizedURL,
-        reason: str,
-        *,
-        decision_reason: str = "",
-    ) -> None:
-        if not decision_reason:
-            log_event(
-                self._logger,
-                logging.DEBUG,
-                "body_rejected",
-                url=str(url),
-                reason=reason,
-            )
-            return
+    def _log_rejected(self, url: NormalizedURL, reason: str) -> None:
         log_event(
             self._logger,
             logging.DEBUG,
             "body_rejected",
-            url=str(url),
+            url=target_url_for_log(str(url)),
             reason=reason,
-            decision_reason=decision_reason,
         )
 
     def _log_final(self, url: NormalizedURL, text: str, reason: str) -> None:
@@ -229,7 +209,7 @@ class FetchOrchestrator:
             self._logger,
             logging.DEBUG,
             "body_accepted",
-            url=str(url),
+            url=target_url_for_log(str(url)),
             reason=reason,
             output_chars=len(text),
         )

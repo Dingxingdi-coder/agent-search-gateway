@@ -9,7 +9,7 @@ import httpx
 
 from ..errors import ErrorCode, ExecutionFailure, ProtocolFailure
 from ..models import RetryPolicy
-from ..observability import log_event
+from ..observability import elapsed_ms, http_endpoint_for_log, log_event
 from ..retry import retry_async
 
 
@@ -48,6 +48,7 @@ class HttpJsonExecutor:
     ) -> object:
         attempt = 0
         attempt_started = self._monotonic()
+        log_endpoint = http_endpoint_for_log(url)
 
         def before_attempt(current_attempt: int) -> None:
             nonlocal attempt, attempt_started
@@ -59,13 +60,13 @@ class HttpJsonExecutor:
                 "http_attempt_started",
                 provider=self._provider_name,
                 stage=stage,
-                endpoint=url,
+                endpoint=log_endpoint,
                 attempt=attempt,
             )
 
         def on_retry(current_attempt: int, exc: BaseException, delay: float) -> None:
             delay_ms = max(0, int(delay * 1000))
-            elapsed_ms = self._elapsed_ms(attempt_started)
+            attempt_elapsed_ms = elapsed_ms(self._monotonic, attempt_started)
             if isinstance(exc, _RetryableStatus):
                 log_event(
                     self._logger,
@@ -73,10 +74,10 @@ class HttpJsonExecutor:
                     "http_retrying",
                     provider=self._provider_name,
                     stage=stage,
-                    endpoint=url,
+                    endpoint=log_endpoint,
                     attempt=current_attempt,
                     delay_ms=delay_ms,
-                    elapsed_ms=elapsed_ms,
+                    elapsed_ms=attempt_elapsed_ms,
                     category="status",
                     status=exc.status_code,
                 )
@@ -87,10 +88,10 @@ class HttpJsonExecutor:
                 "http_retrying",
                 provider=self._provider_name,
                 stage=stage,
-                endpoint=url,
+                endpoint=log_endpoint,
                 attempt=current_attempt,
                 delay_ms=delay_ms,
-                elapsed_ms=elapsed_ms,
+                elapsed_ms=attempt_elapsed_ms,
                 category="transport",
             )
 
@@ -108,10 +109,10 @@ class HttpJsonExecutor:
                 "http_attempt_completed",
                 provider=self._provider_name,
                 stage=stage,
-                endpoint=url,
+                endpoint=log_endpoint,
                 attempt=attempt,
                 status=response.status_code,
-                elapsed_ms=self._elapsed_ms(attempt_started),
+                elapsed_ms=elapsed_ms(self._monotonic, attempt_started),
             )
             if response.status_code in {408, 429} or response.status_code >= 500:
                 raise _RetryableStatus(response.status_code)
@@ -127,27 +128,24 @@ class HttpJsonExecutor:
                 on_retry=on_retry,
             )
         except _RetryableStatus as exc:
-            self._log_failed(stage, url, attempt, "status", status=exc.status_code)
+            self._log_failed(stage, log_endpoint, attempt, "status", status=exc.status_code)
             raise self._execution_failure(stage, f"HTTP status {exc.status_code}") from exc
         except (httpx.TimeoutException, httpx.TransportError) as exc:
-            self._log_failed(stage, url, attempt, "transport")
+            self._log_failed(stage, log_endpoint, attempt, "transport")
             raise self._execution_failure(stage, "HTTP transport failure") from exc
 
         if response.status_code >= 400:
-            self._log_failed(stage, url, attempt, "status", status=response.status_code)
+            self._log_failed(stage, log_endpoint, attempt, "status", status=response.status_code)
             raise self._execution_failure(stage, f"HTTP status {response.status_code}")
 
         try:
             return response.json()
         except ValueError as exc:
-            self._log_failed(stage, url, attempt, "decode")
+            self._log_failed(stage, log_endpoint, attempt, "decode")
             raise ProtocolFailure(
                 ErrorCode.PROTOCOL_ERROR,
                 f"{self._provider_name}/{stage}: response was not valid JSON",
             ) from exc
-
-    def _elapsed_ms(self, started: float) -> int:
-        return max(0, int((self._monotonic() - started) * 1000))
 
     def _log_failed(
         self,

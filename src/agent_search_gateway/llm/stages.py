@@ -8,7 +8,7 @@ from typing import TypeVar
 
 from ..errors import ErrorCode, ExecutionFailure
 from ..models import LLMInvocation, StageDecision
-from ..observability import log_event, normalize_log_reason
+from ..observability import elapsed_ms, log_event
 from ..providers.contracts import LLMClient
 from .prompts import (
     content_clean_messages,
@@ -129,8 +129,8 @@ class LLMStages:
             stage=stage,
             model=invocation.model,
             ok=decision.ok,
-            reason=normalize_log_reason(decision.reason),
-            elapsed_ms=self._elapsed_ms(started),
+            reason_present=bool(decision.reason),
+            elapsed_ms=elapsed_ms(self._monotonic, started),
         )
         return decision
 
@@ -165,7 +165,7 @@ class LLMStages:
             stage=stage,
             model=invocation.model,
             output_chars=len(text),
-            elapsed_ms=self._elapsed_ms(started),
+            elapsed_ms=elapsed_ms(self._monotonic, started),
         )
         return text
 
@@ -206,7 +206,7 @@ class LLMStages:
             stage=stage,
             model=invocation.model,
             error_type=type(exc).__name__,
-            elapsed_ms=self._elapsed_ms(started),
+            elapsed_ms=elapsed_ms(self._monotonic, started),
         )
 
     def _stage_cancelled(self, invocation: LLMInvocation, stage: str, started: float) -> None:
@@ -217,11 +217,8 @@ class LLMStages:
             provider=invocation.provider,
             stage=stage,
             model=invocation.model,
-            elapsed_ms=self._elapsed_ms(started),
+            elapsed_ms=elapsed_ms(self._monotonic, started),
         )
-
-    def _elapsed_ms(self, started: float) -> int:
-        return max(0, int((self._monotonic() - started) * 1000))
 
     def _client(self, provider: str) -> LLMClient:
         client = self._clients.get(provider)

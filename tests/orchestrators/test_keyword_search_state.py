@@ -212,9 +212,9 @@ async def test_keyword_search_debug_events_cover_provider_candidate_body_and_per
     success = FakeKeywordSearchProvider(
         "success",
         [
-            KeywordSearchHit("https://example.com/empty?id=1", title=" ", snippet=""),
+            KeywordSearchHit("https://EXAMPLE.COM/empty?id=1", title=" ", snippet=""),
             KeywordSearchHit(
-                "https://example.com/no-body?id=42&mode=test",
+                "https://log-user:LOG_PASSWORD_SENTINEL@EXAMPLE.COM/no-body?id=42&mode=test#frag",
                 snippet="No body",
             ),
             KeywordSearchHit(
@@ -233,7 +233,7 @@ async def test_keyword_search_debug_events_cover_provider_candidate_body_and_per
                 raw_content="PAGE_ACCEPT_SENTINEL",
             ),
             KeywordSearchHit(
-                "https://example.com/no-body?id=42&mode=test",
+                "https://log-user:LOG_PASSWORD_SENTINEL@EXAMPLE.COM/no-body?id=42&mode=test#frag",
                 snippet="Duplicate later",
             ),
         ],
@@ -286,24 +286,24 @@ async def test_keyword_search_debug_events_cover_provider_candidate_body_and_per
         and "reason=empty_abstract" in line
         for line in lines
     )
-    assert "url=https://example.com/no-body?id=42&mode=test" in logged
+    assert "url=https://example.com/no-body?id=42&mode=test#frag" in logged
+    assert "LOG_PASSWORD_SENTINEL" not in logged
     assert any("event=body_skipped" in line and "reason=no_body" in line for line in lines)
     assert any(
         "event=body_rejected" in line and "reason=cheap_check" in line for line in lines
     )
     assert any(
-        "event=body_rejected" in line
-        and "reason=judge_rejected" in line
-        and "decision_reason=\"not usable\"" in line
-        for line in lines
+        "event=body_rejected" in line and "reason=judge_rejected" in line for line in lines
     )
+    assert "decision_reason=" not in logged
+    assert "not usable" not in logged
     assert any(
         "event=body_accepted" in line and "url=https://example.com/accepted?id=4" in line
         for line in lines
     )
     assert any(
         "event=candidate_rejected" in line
-        and "url=https://example.com/no-body?id=42&mode=test" in line
+        and "url=https://example.com/no-body?id=42&mode=test#frag" in line
         and "reason=duplicate" in line
         for line in lines
     )

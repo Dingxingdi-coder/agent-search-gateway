@@ -199,7 +199,7 @@ Cover:
 - provider events identify provider;
 - LLM events identify semantic stage rather than only generic transport stage;
 - duration values are non-negative integers when present;
-- full target URL query values are retained, per the chosen policy;
+- target URL query/fragment values are retained after URI userinfo is stripped, per the chosen policy;
 - values containing newlines are normalized/escaped so the one-line invariant holds.
 
 Only assert global field order if the formatter explicitly defines it as a stable contract.
@@ -237,13 +237,13 @@ Run representative LLM-search, judge, safety, clean, summary, keyword, and fetch
 
 #### Target URL Policy
 
-Use a URL with ordinary test query values, for example:
+Use a target URL with ordinary query/fragment values and URI userinfo, for example:
 
 ```text
-https://example.com/download?id=42&mode=test
+https://user:password@example.com/download?id=42&mode=test#section
 ```
 
-Assert the complete URL appears when a URL event is logged. This makes the selected full-URL diagnostic policy explicit.
+Assert the logged target URL retains `/download?id=42&mode=test#section` but strips `user:password@`. Separately, HTTP transport `endpoint` fields must strip userinfo, query, and fragment so dynamically constructed search-query URLs do not persist request content.
 
 ---
 
@@ -323,7 +323,7 @@ Use fake providers to cover events for:
 - invalid provider data category;
 - no-body case;
 - cheap-check rejection;
-- judge rejection with short reason;
+- judge rejection with the fixed `judge_rejected` reason code while excluding free-form model reason text;
 - judge acceptance;
 - URL dedup/admission metadata;
 - final result count/path containing the request ID.
@@ -356,7 +356,7 @@ Cover:
 - semantic rejection logs rejection and a later provider can succeed;
 - each fetched candidate gets accepted/rejected metadata;
 - content-clean logs stage and size metadata without body;
-- safety logs decision and short reason;
+- safety logs the decision and fixed rejection code while excluding free-form model reason text;
 - focus-summary logs stage metadata without focus/page body.
 
 #### Singleflight Correlation
@@ -394,7 +394,7 @@ For judge, safety, content-clean, focus-summary, and LLM-search, cover:
 - start event includes stage/provider/model;
 - input-size metadata where implemented;
 - completion event includes output size or decision as relevant;
-- decision reason is normalized to one line;
+- free-form decision reason text is absent; completion records only safe derived decision metadata such as `ok` and `reason_present`;
 - raw message contents are absent;
 - invalid response/parse failure logs category, not raw output;
 - retries remain execution semantics, not semantic rejection.
@@ -522,7 +522,7 @@ Also assert documentation covers:
 - `agent-search-gateway start --debug`;
 - debug-log path;
 - 5 MiB rotation and 3 backups at a useful user-facing level;
-- debug logs may contain complete target URLs and should be treated as potentially sensitive local artifacts;
+- debug logs may contain target URL path/query/fragment values after URI userinfo stripping and should be treated as potentially sensitive local artifacts;
 - prompt/page/model response bodies are not intentionally logged;
 - normal business-command stdout remains final-output-only.
 
@@ -632,7 +632,7 @@ Implementation is ready only when:
 - representative provider/candidate/stage paths have debug-event coverage;
 - prompt/page/model body sentinels never appear in debug output;
 - configured credential sentinel values never appear in debug output;
-- complete target URL query values do appear, matching the chosen policy;
+- target URL path/query/fragment values do appear after URI userinfo is stripped, while HTTP endpoint query/fragment values do not appear;
 - expected failures have no traceback and unexpected internal failures have traceback only in debug mode;
 - logging bootstrap failure blocks only debug startup;
 - post-start logging sink failure does not change business semantics;

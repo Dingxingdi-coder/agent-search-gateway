@@ -1,7 +1,7 @@
 ---
 created: 2026-08-20
 updated: 2026-08-20
-notes: "基于 debug-doctor-uv-tool-install 的 architecture、error-handling 与 testing 设计；当前基线为 99 passed, 2 skipped。"
+notes: "基于 debug-doctor-uv-tool-install 的 architecture、error-handling 与 testing 设计；实施前的历史基线为 99 passed, 2 skipped。"
 ---
 
 # Debug Tracing, Doctor, and uv Tool Installation Implementation Plan
@@ -191,11 +191,11 @@ def render_doctor(report: DoctorReport, stream: TextIO) -> None: ...
 | Daemon session | `session_started`, `session_stopped` | `pid`, `debug` |
 | Business request | `workflow_started`, `workflow_completed`, `workflow_failed`, `workflow_cancelled`, `workflow_rejected` | `command`, `elapsed_ms`, `error_code`, `error_type` |
 | Provider pipeline | `provider_started`, `provider_completed`, `provider_failed` | `provider`, `stage`, counts, `elapsed_ms` |
-| HTTP/retry | `http_attempt_started`, `http_attempt_completed`, `http_retrying`, `http_failed` | `provider`, `stage`, endpoint URL, `attempt`, `status`, `delay_ms`, `elapsed_ms`, failure category |
+| HTTP/retry | `http_attempt_started`, `http_attempt_completed`, `http_retrying`, `http_failed` | `provider`, `stage`, endpoint URL with userinfo/query/fragment removed, `attempt`, `status`, `delay_ms`, `elapsed_ms`, failure category |
 | Quota/scheduler | `quota_waiting`, `quota_acquired`, `quota_released`, `scheduler_waiting`, `provider_selected`, `provider_fallback` | `provider`, quota kind, `in_use`, `limit`, candidate count |
-| LLM semantic stage | `llm_stage_started`, `llm_stage_completed`, `llm_stage_failed`, `llm_stage_cancelled` | `provider`, `stage`, `model`, char counts, decision, short reason, `elapsed_ms` |
-| Search/fetch candidates | `candidate_accepted`, `candidate_rejected`, `body_accepted`, `body_rejected`, `body_skipped` | full `url`, source/provider, char counts, stable reason |
-| Singleflight/lock | `singleflight_leader`, `singleflight_joined`, `url_lock_acquired` | full `url`, focus-present boolean, wait time |
+| LLM semantic stage | `llm_stage_started`, `llm_stage_completed`, `llm_stage_failed`, `llm_stage_cancelled` | `provider`, `stage`, `model`, char counts, decision boolean, reason-present flag, `elapsed_ms`; never free-form model reason text |
+| Search/fetch candidates | `candidate_accepted`, `candidate_rejected`, `body_accepted`, `body_rejected`, `body_skipped` | target `url` path/query/fragment with userinfo stripped, source/provider, char counts, stable reason |
+| Singleflight/lock | `singleflight_leader`, `singleflight_joined`, `url_lock_acquired` | target `url` path/query/fragment with userinfo stripped, focus-present boolean, wait time |
 | Persistence | `results_written` | `kind`, `path`, `results` |
 
 Every business event receives `request=<8hex>` from the formatter. Lifecycle/startup events render `request=-`. Do not log query/prompt/focus/page/candidate/model-output strings as fields; use only presence flags and character counts.
@@ -602,13 +602,13 @@ git commit -m "feat: correlate requests with result files"
 
 - [ ] **Step 1: Write formatter/event contract tests**
 
-Create focused tests around `log_event` and the formatter. Bind `request_id="11111111"`, emit an event containing provider, semantic stage, full URL with query values, integer counts and a reason containing newline/tab characters. Assert:
+Create focused tests around `log_event` and the formatter. Bind `request_id="11111111"`, emit an event containing provider, semantic stage, target URL path/query/fragment values after URI-userinfo stripping, integer counts and a trusted local reason containing newline/tab characters. Assert:
 
 ```text
 one physical output line
 starts with DEBUG request=11111111
 contains provider/stage/event fields
-contains the complete target URL query string
+contains the target URL query/fragment string with URI userinfo removed
 newline/tab values are escaped, not emitted physically
 lifecycle event outside a request renders request=-
 ```
@@ -1143,7 +1143,7 @@ For `judge`, `safety`, `content_clean`, `focus_summary`, and `llm_search_markdow
 
 - start event includes semantic `stage`, provider and model;
 - safe input/output character counts are present;
-- completion includes `ok` plus a normalized short reason for decision stages, or output length for text stages;
+- completion includes `ok` plus a `reason_present` boolean for decision stages, or output length for text stages; free-form model reason text is never logged;
 - elapsed time is non-negative;
 - client/parse failure emits `llm_stage_failed` with error type/category but no raw response;
 - cancellation emits `llm_stage_cancelled` and is re-raised.
@@ -1161,9 +1161,9 @@ Use distinct values:
 
 Place them in prompt, content, focus and fake model output. Assert none appear in logs while lengths/provider/model/stage do appear.
 
-- [ ] **Step 3: Add decision-reason normalization tests**
+- [ ] **Step 3: Add decision-reason suppression tests**
 
-A reason containing newline, tabs and a long suffix must become one short field. Add a small `normalize_log_reason(value, max_chars=160)` helper in observability and test truncation/escaping. The helper must not be used to make arbitrary body logging acceptable.
+Use a decision reason containing newline, tabs, a long suffix, and a distinctive model-output sentinel. Assert the semantic event logs only safe derived metadata such as `ok` and `reason_present`, and that the free-form reason text never reaches the debug sink. `normalize_log_reason(...)` remains available for trusted local diagnostic reasons such as doctor/OS messages, not model output.
 
 - [ ] **Step 4: Run focused tests and confirm RED**
 
@@ -1199,7 +1199,7 @@ Use only:
 - provider/model/stage;
 - input and output character counts;
 - focus-present/focus-character count, never focus text;
-- decision boolean and normalized reason;
+- decision boolean and reason-present flag; never free-form model reason text;
 - elapsed/error type.
 
 Do not log `messages`, payload mappings or returned text.
@@ -1262,7 +1262,7 @@ For each branch in `_stage_keyword_hit`, assert a URL-scoped event:
 - valid URL/no body -> `candidate_accepted` plus `body_skipped reason=no_body`;
 - stored unavailable URL -> body skipped without judge invocation;
 - whitespace body -> `body_rejected reason=cheap_check`;
-- judge `ok=false` -> `body_rejected reason=judge_rejected` plus normalized decision reason;
+- judge `ok=false` -> `body_rejected reason=judge_rejected`; free-form decision reason is excluded from telemetry;
 - judge accepted -> `body_accepted` with raw/content character counts;
 - duplicate/admission keeps deterministic first-write behavior and records a dedup/admission reason without changing output order.
 
@@ -1364,7 +1364,7 @@ Assert the leader callback runs once in the leader caller context, each follower
 
 Under fixed request contexts, cover events for:
 
-- normalized full URL and focus-present/focus-character count;
+- normalized target URL path/query/fragment after URI-userinfo stripping plus focus-present/focus-character count;
 - exact-key leader versus follower;
 - per-URL lock wait/acquire time;
 - URL not admitted, already unavailable, cached content, raw-only, and provider-fetch-required branches;
@@ -1823,7 +1823,7 @@ Assert README documents:
 
 - `~/.cache/agent-search-gateway-cli/logs/debug.log`;
 - 5 MiB current file and 3 backups;
-- full target URLs may be persisted and logs should be treated as sensitive local artifacts;
+- target URL path/query/fragment values may be persisted after URI userinfo is stripped, and logs should be treated as sensitive local artifacts;
 - query/prompt/page/model-response bodies and authentication values are not intentionally logged;
 - business command stdout remains final-output-only;
 - doctor is local/no-network and daemon-not-running is informational.
@@ -1867,7 +1867,7 @@ Explain that `uv tool install .` creates an isolated CLI runtime and does not re
 
 - [ ] **Step 6: Document doctor and debug operational behavior**
 
-Include command examples, log location/rotation, session/request correlation, result filename correlation, payload exclusions, full-URL warning and final-output-only stdout. Keep limitations aligned with the design; do not promise live provider checks or automatic fixes.
+Include command examples, log location/rotation, session/request correlation, result filename correlation, payload exclusions, the sensitive target-URL query/fragment warning plus URI-userinfo stripping, and final-output-only stdout. Keep limitations aligned with the design; do not promise live provider checks or automatic fixes.
 
 - [ ] **Step 7: Add a separate isolated CI smoke step**
 

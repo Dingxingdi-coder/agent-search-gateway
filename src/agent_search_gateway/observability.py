@@ -8,6 +8,7 @@ from contextlib import suppress
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import TextIO
+from urllib.parse import urlsplit, urlunsplit
 
 from .errors import ConfigFailure, ErrorCode
 from .request_ids import current_request_id
@@ -85,6 +86,44 @@ def normalize_log_reason(value: str, max_chars: int = 160) -> str:
     if max_chars == 1:
         return "…"
     return f"{normalized[: max_chars - 1]}…"
+
+
+def elapsed_ms(monotonic: Callable[[], float], started: float) -> int:
+    """Convert a monotonic interval to a non-negative whole-millisecond duration."""
+
+    return max(0, int((monotonic() - started) * 1000))
+
+
+def target_url_for_log(value: str) -> str:
+    """Strip URI userinfo while retaining target path/query/fragment diagnostics."""
+
+    return _url_for_log(value, keep_query=True, keep_fragment=True)
+
+
+def http_endpoint_for_log(value: str) -> str:
+    """Render an HTTP endpoint without userinfo or request-specific query data."""
+
+    return _url_for_log(value, keep_query=False, keep_fragment=False)
+
+
+def _url_for_log(value: str, *, keep_query: bool, keep_fragment: bool) -> str:
+    try:
+        parsed = urlsplit(value)
+    except (ValueError, UnicodeError):
+        return "<invalid-url>"
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return "<invalid-url>"
+    _, separator, hostport = parsed.netloc.rpartition("@")
+    netloc = hostport if separator else parsed.netloc
+    return urlunsplit(
+        (
+            parsed.scheme,
+            netloc,
+            parsed.path,
+            parsed.query if keep_query else "",
+            parsed.fragment if keep_fragment else "",
+        )
+    )
 
 
 def _render_string(value: str) -> str:

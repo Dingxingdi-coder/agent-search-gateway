@@ -187,9 +187,10 @@ async def test_fetch_scheduler_debug_events_cover_fallback_semantics_and_accepta
         "event=body_rejected" in line
         and "provider=semantic" in line
         and "reason=judge_rejected" in line
-        and "decision_reason=rejected" in line
         for line in lines
     )
+    assert "decision_reason=" not in logged
+    assert "reason=rejected" not in logged
     assert any(
         "event=provider_fallback" in line
         and "provider=semantic" in line

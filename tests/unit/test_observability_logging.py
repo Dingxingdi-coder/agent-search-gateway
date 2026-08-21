@@ -15,7 +15,9 @@ from agent_search_gateway.observability import (
     SecretRedactor,
     SecretValue,
     configure_debug_logging,
+    http_endpoint_for_log,
     log_event,
+    target_url_for_log,
 )
 from agent_search_gateway.request_ids import bind_request_id
 
@@ -61,6 +63,14 @@ def test_formatter_emits_structured_single_line_with_request_context() -> None:
     stream.truncate(0)
     log_event(logger, logging.DEBUG, "session_started", pid=123)
     assert stream.getvalue().startswith("DEBUG request=- event=session_started ")
+
+
+def test_log_url_helpers_preserve_target_diagnostics_without_auth_or_request_query() -> None:
+    value = "https://user:password@example.com:8443/path?q=QUERY_SENTINEL#fragment"
+
+    assert target_url_for_log(value) == "https://example.com:8443/path?q=QUERY_SENTINEL#fragment"
+    assert http_endpoint_for_log(value) == "https://example.com:8443/path"
+    assert target_url_for_log("not-a-url USERINFO_SENTINEL") == "<invalid-url>"
 
 
 def test_final_formatter_redacts_fields_and_exception_traceback() -> None:
@@ -160,18 +170,28 @@ def test_debug_log_appends_across_restart_and_rotates_with_bounded_backups(tmp_p
     first_stderr = io.StringIO()
     first = configure_debug_logging(log_file, stderr=first_stderr, max_bytes=220, backup_count=3)
     project_logger = logging.getLogger("agent_search_gateway")
-    log_event(project_logger, logging.DEBUG, "first_session", marker="before-restart")
-    first.close()
+    try:
+        log_event(project_logger, logging.DEBUG, "first_session", marker="before-restart")
+    finally:
+        first.close()
 
     second = configure_debug_logging(log_file, stderr=io.StringIO(), max_bytes=220, backup_count=3)
-    log_event(project_logger, logging.DEBUG, "second_session", marker="after-restart")
-    appended = log_file.read_text(encoding="utf-8")
-    assert "after-restart" in appended
-    assert "before-restart" in appended
+    try:
+        log_event(project_logger, logging.DEBUG, "second_session", marker="after-restart")
+        appended = log_file.read_text(encoding="utf-8")
+        assert "after-restart" in appended
+        assert "before-restart" in appended
 
-    for index in range(40):
-        log_event(project_logger, logging.DEBUG, "rotation_probe", index=index, payload="x" * 80)
-    second.close()
+        for index in range(40):
+            log_event(
+                project_logger,
+                logging.DEBUG,
+                "rotation_probe",
+                index=index,
+                payload="x" * 80,
+            )
+    finally:
+        second.close()
 
     assert log_file.exists()
     assert (tmp_path / "debug.log.1").exists()

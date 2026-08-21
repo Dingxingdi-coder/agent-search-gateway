@@ -43,19 +43,21 @@ async def _run_debug_daemon(paths: RuntimePaths) -> str:
     stderr = StringIO()
     session = configure_debug_logging(paths.debug_log_file, stderr=stderr)
     runtime = _Runtime()
-    daemon = ForegroundDaemon(
-        paths,
-        runtime_factory=lambda: runtime,
-        debug=True,
-        logging_session=session,
-    )
-    task = asyncio.create_task(daemon.start())
-    await daemon.ready.wait()
-    await daemon.stop_for_test()
-    await task
-    session.close()
-    assert runtime.close_calls == 1
-    return paths.debug_log_file.read_text(encoding="utf-8")
+    try:
+        daemon = ForegroundDaemon(
+            paths,
+            runtime_factory=lambda: runtime,
+            debug=True,
+            logging_session=session,
+        )
+        task = asyncio.create_task(daemon.start())
+        await daemon.ready.wait()
+        await daemon.stop_for_test()
+        await task
+        assert runtime.close_calls == 1
+        return paths.debug_log_file.read_text(encoding="utf-8")
+    finally:
+        session.close()
 
 
 async def test_debug_daemon_writes_exact_session_markers_and_appends(tmp_path: Path) -> None:
@@ -97,9 +99,11 @@ async def test_runtime_failure_before_bind_has_no_successful_session_marker(tmp_
         debug=True,
         logging_session=session,
     )
-    with pytest.raises(ConfigFailure, match="runtime failed"):
-        await daemon.start()
-    session.close()
+    try:
+        with pytest.raises(ConfigFailure, match="runtime failed"):
+            await daemon.start()
+    finally:
+        session.close()
 
     text = paths.debug_log_file.read_text(encoding="utf-8")
     assert "event=session_started" not in text

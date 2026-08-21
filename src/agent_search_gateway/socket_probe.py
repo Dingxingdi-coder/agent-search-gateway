@@ -59,7 +59,7 @@ async def probe_unix_socket(
         return SocketProbeResult(SocketState.OS_ERROR, identity, _safe_reason(exc))
 
     writer.close()
-    with suppress(ConnectionError, BrokenPipeError):
+    with suppress(OSError):
         await writer.wait_closed()
     return SocketProbeResult(SocketState.LIVE, identity)
 

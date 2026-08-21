@@ -1,6 +1,7 @@
 import asyncio
 import socket
 from pathlib import Path
+from typing import cast
 
 from agent_search_gateway.socket_probe import SocketState, probe_unix_socket
 
@@ -46,6 +47,32 @@ async def test_socket_probe_live_connection_sends_no_bytes(tmp_path: Path) -> No
     finally:
         server.close()
         await server.wait_closed()
+        socket_path.unlink(missing_ok=True)
+
+
+async def test_socket_probe_treats_writer_close_oserror_as_live(tmp_path: Path) -> None:
+    socket_path = tmp_path / "close-error.sock"
+    bound = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    bound.bind(str(socket_path))
+    bound.listen(1)
+
+    class CloseErrorWriter:
+        def close(self) -> None:
+            return None
+
+        async def wait_closed(self) -> None:
+            raise OSError("synthetic close failure")
+
+    async def connector(
+        **kwargs: object,
+    ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        return asyncio.StreamReader(), cast(asyncio.StreamWriter, CloseErrorWriter())
+
+    try:
+        result = await probe_unix_socket(socket_path, connector=connector)
+        assert result.state is SocketState.LIVE
+    finally:
+        bound.close()
         socket_path.unlink(missing_ok=True)
 
 

@@ -153,8 +153,8 @@ Debug mode does not alter the existing user-visible error model.
 | Provider malformed data | Fail that provider pipeline/attempt | Provider failure event with category; no traceback |
 | LLM protocol/parse failure | Retry or fail relevant stage/pipeline | Stage failure event; no raw response; no traceback |
 | `cheap_check` rejection | Existing semantic behavior | Candidate rejected event with reason |
-| judge `ok=false` | Existing semantic behavior | Candidate rejected event with short decision reason |
-| safety `ok=false` | Mark unavailable according to existing rules | Safety rejected event with short decision reason |
+| judge `ok=false` | Existing semantic behavior | Candidate rejected event with fixed `judge_rejected` reason code; free-form model reason is not logged |
+| safety `ok=false` | Mark unavailable according to existing rules | Safety rejected event with fixed `safety_rejected` reason code; free-form model reason is not logged |
 | All providers fail | Existing `ALL_PROVIDERS_FAILED` response | Request failure summary after provider events |
 | Daemon shutting down | Existing `DAEMON_SHUTTING_DOWN` response | Concise rejection event |
 
@@ -211,23 +211,25 @@ Logging call sites must not pass values from these or equivalent authentication 
 - `X-Subscription-Token`
 - any configured provider secret
 
-Target URLs, including query values, are intentionally allowed by the selected debug policy and are not treated as authentication-header secrets by this feature.
+Target URL path/query/fragment values are intentionally allowed by the selected debug policy, but URI userinfo must be stripped before logging. HTTP transport `endpoint` fields must strip userinfo, query, and fragment so dynamic request parameters are not persisted as endpoint metadata.
 
-#### Defense-in-Depth Redaction
+#### Mandatory Final-Stage Redaction
 
-After config resolution succeeds, resolved `SecretValue` instances should be attached to the project handlers through `SecretRedactingFilter` (or an equivalent centralized filter).
+After config resolution succeeds, every resolved non-empty `SecretValue` must be registered with the centralized redactor used by both debug handlers.
 
 Rules:
 
 - Redaction is a backstop, not permission for call sites to log headers.
-- The filter should apply to both stderr and rotating-file handlers in debug mode.
+- Both stderr and rotating-file handlers must redact the fully rendered log line, including any formatted traceback, before it reaches the sink.
+- Debug traceback emission is permitted only through a handler/formatter path that guarantees this final-stage redaction. If that guarantee is unavailable, suppress the traceback rather than emit an unredacted one.
 - If config resolution itself fails before secrets are resolved, the user-facing `ConfigFailure` message may contain environment-variable names but never secret values.
 
 #### Traceback Safety
 
 Unexpected tracebacks may contain exception messages from libraries. Therefore:
 
-- Central secret redaction must run after traceback/message rendering at the handler boundary where possible.
+- Central secret redaction must run after message and traceback rendering for every debug sink.
+- Regression coverage must include a secret present only in exception text and prove it is absent from both debug stderr and rotating-file output.
 - Provider code should continue wrapping transport/protocol failures in gateway errors that do not embed raw headers/request bodies.
 - Debug code must not attach full HTTP request objects to exception/log fields.
 

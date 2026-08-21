@@ -1,11 +1,12 @@
 import asyncio
 import json
+import logging
 from io import StringIO
 from pathlib import Path
 
 from agent_search_gateway.cli import build_parser, run_command
 from agent_search_gateway.daemon import ForegroundDaemon
-from agent_search_gateway.observability import DebugLoggingSession, SecretValue
+from agent_search_gateway.observability import DebugLoggingSession, SecretValue, log_event
 from agent_search_gateway.paths import RuntimePaths
 from tests.doctor._support import environment_name, write_valid_config
 from tests.support.acceptance import (
@@ -40,7 +41,27 @@ async def _start_acceptance_daemon(
     ) -> ForegroundDaemon:
         assert received_paths == paths
         if logging_session is not None:
-            logging_session.add_secrets(SecretValue(runtime.credential_sentinel))
+            traceback_secret = f"{runtime.credential_sentinel}_TRACEBACK_ONLY"
+            logging_session.add_secrets(
+                SecretValue(runtime.credential_sentinel),
+                SecretValue(traceback_secret),
+            )
+            project_logger = logging.getLogger("agent_search_gateway.acceptance")
+            log_event(
+                project_logger,
+                logging.DEBUG,
+                "credential_redaction_probe",
+                detail=runtime.credential_sentinel,
+            )
+            try:
+                raise RuntimeError(traceback_secret)
+            except RuntimeError:
+                log_event(
+                    project_logger,
+                    logging.ERROR,
+                    "credential_traceback_redaction_probe",
+                    exc_info=True,
+                )
         daemon = ForegroundDaemon(
             paths,
             runtime_factory=lambda: runtime,
@@ -89,7 +110,7 @@ async def test_debug_cli_workflow_preserves_public_contract_and_correlates_trace
 ) -> None:
     paths = RuntimePaths.from_home(tmp_path)
     runtime = build_debug_acceptance_runtime(paths)
-    start_task, _daemon, _start_stdout, _start_stderr = await _start_acceptance_daemon(
+    start_task, _daemon, _start_stdout, start_stderr = await _start_acceptance_daemon(
         paths,
         runtime,
         debug=True,
@@ -139,6 +160,16 @@ async def test_debug_cli_workflow_preserves_public_contract_and_correlates_trace
     assert runtime.close_calls == 1
 
     debug_log = paths.debug_log_file.read_text(encoding="utf-8")
+    debug_stderr = start_stderr.getvalue()
+    assert DEBUG_CREDENTIAL_SENTINEL not in debug_log
+    assert DEBUG_CREDENTIAL_SENTINEL not in debug_stderr
+    assert f"{DEBUG_CREDENTIAL_SENTINEL}_TRACEBACK_ONLY" not in debug_log
+    assert f"{DEBUG_CREDENTIAL_SENTINEL}_TRACEBACK_ONLY" not in debug_stderr
+    assert "event=credential_redaction_probe" in debug_log
+    assert "event=credential_traceback_redaction_probe" in debug_log
+    assert "traceback=" in debug_log
+    assert "<redacted>" in debug_log
+    assert "<redacted>" in debug_stderr
     request_lines = [line for line in debug_log.splitlines() if "request=a1b2c3d4" in line]
     assert "event=session_started" in debug_log
     assert "event=session_stopped" in debug_log

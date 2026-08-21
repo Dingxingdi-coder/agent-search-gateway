@@ -27,7 +27,9 @@ def test_readme_documents_debug_and_doctor_operational_contract() -> None:
     assert "~/.cache/agent-search-gateway-cli/logs/debug.log" in readme
     assert "5 MiB" in readme
     assert "3 backups" in readme
-    assert "complete target URLs" in readme
+    assert "Target URL path/query/fragment values" in readme
+    assert "URI userinfo is stripped" in readme
+    assert "HTTP transport endpoint fields" in readme
     assert "sensitive local artifacts" in readme
     assert "query/prompt/page/model-response bodies" in readme
     assert "authentication values" in readme

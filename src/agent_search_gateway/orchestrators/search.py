@@ -11,7 +11,7 @@ from ..errors import ErrorCode, ExecutionFailure, InputFailure
 from ..llm.stages import LLMStages, cheap_check
 from ..llm_search_parser import parse_search_markdown
 from ..models import LLMInvocation, SearchRecord
-from ..observability import log_event, normalize_log_reason
+from ..observability import elapsed_ms, log_event, target_url_for_log
 from ..providers.contracts import KeywordSearchHit, KeywordSearchProvider
 from ..request_ids import validate_request_id
 from ..result_writer import ResultWriter
@@ -96,7 +96,7 @@ class SearchOrchestrator:
                         logging.DEBUG,
                         "candidate_rejected",
                         provider=staged.provider,
-                        url=str(staged.url),
+                        url=target_url_for_log(str(staged.url)),
                         reason="duplicate",
                     )
 
@@ -195,7 +195,7 @@ class SearchOrchestrator:
             model=invocation.model,
             output_chars=len(markdown),
             results=len(records),
-            elapsed_ms=self._elapsed_ms(started),
+            elapsed_ms=elapsed_ms(self._monotonic, started),
         )
         return records
 
@@ -241,7 +241,7 @@ class SearchOrchestrator:
             stage="search",
             hits=len(hits),
             results=len(staged),
-            elapsed_ms=self._elapsed_ms(started),
+            elapsed_ms=elapsed_ms(self._monotonic, started),
         )
         return staged
 
@@ -259,12 +259,16 @@ class SearchOrchestrator:
 
         abstract = hit.snippet.strip() or hit.title.strip()
         if not abstract:
+            try:
+                logged_url = target_url_for_log(str(normalize_url(hit.url)))
+            except InputFailure:
+                logged_url = target_url_for_log(hit.url)
             log_event(
                 self._logger,
                 logging.DEBUG,
                 "candidate_rejected",
                 provider=provider,
-                url=hit.url,
+                url=logged_url,
                 reason="empty_abstract",
             )
             return None
@@ -274,7 +278,7 @@ class SearchOrchestrator:
             logging.DEBUG,
             "candidate_accepted",
             provider=provider,
-            url=str(url),
+            url=target_url_for_log(str(url)),
             abstract_chars=len(abstract),
         )
         current = self._store.get(url)
@@ -297,20 +301,14 @@ class SearchOrchestrator:
 
         decision = await self._stages.judge(candidate)
         if not decision.ok:
-            self._log_body_decision(
-                provider,
-                url,
-                "body_rejected",
-                "judge_rejected",
-                decision_reason=normalize_log_reason(decision.reason),
-            )
+            self._log_body_decision(provider, url, "body_rejected", "judge_rejected")
             return _StagedKeyword(url=url, abstract=abstract, provider=provider)
         log_event(
             self._logger,
             logging.DEBUG,
             "body_accepted",
             provider=provider,
-            url=str(url),
+            url=target_url_for_log(str(url)),
             raw_chars=len(raw_content),
             content_chars=len(content),
         )
@@ -328,27 +326,14 @@ class SearchOrchestrator:
         url: NormalizedURL,
         event: str,
         reason: str,
-        *,
-        decision_reason: str = "",
     ) -> None:
-        if not decision_reason:
-            log_event(
-                self._logger,
-                logging.DEBUG,
-                event,
-                provider=provider,
-                url=str(url),
-                reason=reason,
-            )
-            return
         log_event(
             self._logger,
             logging.DEBUG,
             event,
             provider=provider,
-            url=str(url),
+            url=target_url_for_log(str(url)),
             reason=reason,
-            decision_reason=decision_reason,
         )
 
     def _log_provider_failure(
@@ -365,11 +350,8 @@ class SearchOrchestrator:
             provider=provider,
             stage=stage,
             error_type=type(exc).__name__,
-            elapsed_ms=self._elapsed_ms(started),
+            elapsed_ms=elapsed_ms(self._monotonic, started),
         )
-
-    def _elapsed_ms(self, started: float) -> int:
-        return max(0, int((self._monotonic() - started) * 1000))
 
     def _record_from_store(self, url: NormalizedURL) -> SearchRecord:
         record = self._store.get(url)

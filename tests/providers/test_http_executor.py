@@ -46,7 +46,7 @@ async def test_http_executor_retries_retryable_status_and_hides_sensitive_payloa
         )
         result = await executor.request_json(
             "POST",
-            "https://provider.example.test/search",
+            "https://endpoint-user:ENDPOINT_PASSWORD_SENTINEL@provider.example.test/search?q=QUERY_PARAMETER_SENTINEL#fragment",
             stage="search",
             headers={"Authorization": "Bearer credential-value"},
             json_body={"query": "SENSITIVE_BODY"},
@@ -68,6 +68,9 @@ async def test_http_executor_retries_retryable_status_and_hides_sensitive_payloa
     assert all("provider=fake" in line for line in lines)
     assert all("stage=search" in line for line in lines)
     assert all("endpoint=https://provider.example.test/search" in line for line in lines)
+    assert "ENDPOINT_PASSWORD_SENTINEL" not in logged
+    assert "QUERY_PARAMETER_SENTINEL" not in logged
+    assert "#fragment" not in logged
     assert "credential-value" not in logged
     assert "SENSITIVE_BODY" not in logged
     assert "Request(" not in logged

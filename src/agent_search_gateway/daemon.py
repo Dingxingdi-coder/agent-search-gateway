@@ -22,7 +22,7 @@ from .models import (
     SuccessResponse,
     URLFetchRequest,
 )
-from .observability import DebugLoggingSession, log_event
+from .observability import DebugLoggingSession, elapsed_ms, log_event
 from .paths import RuntimePaths
 from .protocol import NDJSONDecoder, encode_response
 from .providers.defaults import build_default_registry
@@ -297,7 +297,7 @@ class ForegroundDaemon:
                     logging.DEBUG,
                     "workflow_rejected",
                     command=command,
-                    elapsed_ms=self._elapsed_ms(started),
+                    elapsed_ms=elapsed_ms(self._monotonic, started),
                     error_code=ErrorCode.DAEMON_SHUTTING_DOWN.value,
                 )
                 return ErrorResponse(
@@ -314,7 +314,7 @@ class ForegroundDaemon:
                 logging.DEBUG,
                 "workflow_cancelled",
                 command=command,
-                elapsed_ms=self._elapsed_ms(started),
+                elapsed_ms=elapsed_ms(self._monotonic, started),
             )
             raise
         except GatewayError as exc:
@@ -323,7 +323,7 @@ class ForegroundDaemon:
                 logging.DEBUG,
                 "workflow_failed",
                 command=command,
-                elapsed_ms=self._elapsed_ms(started),
+                elapsed_ms=elapsed_ms(self._monotonic, started),
                 error_code=exc.code.value,
                 error_type=type(exc).__name__,
             )
@@ -336,7 +336,7 @@ class ForegroundDaemon:
                 logging.DEBUG,
                 "workflow_completed",
                 command=command,
-                elapsed_ms=self._elapsed_ms(started),
+                elapsed_ms=elapsed_ms(self._monotonic, started),
             )
             return SuccessResponse(text)
         finally:
@@ -374,7 +374,7 @@ class ForegroundDaemon:
                 logging.ERROR,
                 "workflow_failed",
                 command=command,
-                elapsed_ms=self._elapsed_ms(started),
+                elapsed_ms=elapsed_ms(self._monotonic, started),
                 error_type=type(exc).__name__,
                 exc_info=exc,
             )
@@ -384,9 +384,6 @@ class ForegroundDaemon:
                 type(exc).__name__,
             )
         return ErrorResponse(ErrorCode.PROTOCOL_ERROR, "Internal daemon error")
-
-    def _elapsed_ms(self, started: float) -> int:
-        return max(0, int((self._monotonic() - started) * 1000))
 
     def _require_runtime(self) -> RuntimeLike:
         if self._runtime is None:

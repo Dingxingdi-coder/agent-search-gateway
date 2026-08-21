@@ -9,7 +9,7 @@ from ..concurrency import CapacityLease, ProviderQuotaManager
 from ..errors import ErrorCode, ExecutionFailure
 from ..llm.stages import LLMStages, cheap_check
 from ..models import FetchOutcome
-from ..observability import log_event, normalize_log_reason
+from ..observability import elapsed_ms, log_event, target_url_for_log
 from ..providers.contracts import URLFetchCandidate, URLFetchProvider
 from ..url_normalization import NormalizedURL
 
@@ -46,7 +46,7 @@ class FetchScheduler:
                 logging.DEBUG,
                 "provider_selected",
                 provider=provider.name,
-                url=str(url),
+                url=target_url_for_log(str(url)),
                 candidate_count=len(remaining) + 1,
             )
             try:
@@ -61,7 +61,7 @@ class FetchScheduler:
                 logging.DEBUG,
                 "provider_fallback",
                 provider=provider.name,
-                url=str(url),
+                url=target_url_for_log(str(url)),
                 outcome=outcome.kind,
                 remaining=len(remaining),
             )
@@ -105,7 +105,7 @@ class FetchScheduler:
             "provider_started",
             provider=provider.name,
             stage="fetch",
-            url=str(url),
+            url=target_url_for_log(str(url)),
         )
         try:
             candidate = await provider.fetch(url)
@@ -115,7 +115,7 @@ class FetchScheduler:
                 logging.DEBUG,
                 "candidate_accepted",
                 provider=provider.name,
-                url=str(url),
+                url=target_url_for_log(str(url)),
                 raw_chars=len(candidate.raw_content),
                 content_chars=len(candidate.content),
             )
@@ -128,12 +128,7 @@ class FetchScheduler:
                 return FetchOutcome("semantic_failure")
             decision = await self._stages.judge(validation_candidate)
             if not decision.ok:
-                self._log_body_rejected(
-                    provider.name,
-                    url,
-                    "judge_rejected",
-                    decision_reason=normalize_log_reason(decision.reason),
-                )
+                self._log_body_rejected(provider.name, url, "judge_rejected")
                 self._log_provider_completed(provider.name, url, started, "semantic_failure")
                 return FetchOutcome("semantic_failure")
             log_event(
@@ -141,7 +136,7 @@ class FetchScheduler:
                 logging.DEBUG,
                 "body_accepted",
                 provider=provider.name,
-                url=str(url),
+                url=target_url_for_log(str(url)),
                 raw_chars=len(candidate.raw_content),
                 content_chars=len(candidate.content),
             )
@@ -165,27 +160,14 @@ class FetchScheduler:
         provider: str,
         url: NormalizedURL,
         reason: str,
-        *,
-        decision_reason: str = "",
     ) -> None:
-        if not decision_reason:
-            log_event(
-                self._logger,
-                logging.DEBUG,
-                "body_rejected",
-                provider=provider,
-                url=str(url),
-                reason=reason,
-            )
-            return
         log_event(
             self._logger,
             logging.DEBUG,
             "body_rejected",
             provider=provider,
-            url=str(url),
+            url=target_url_for_log(str(url)),
             reason=reason,
-            decision_reason=decision_reason,
         )
 
     def _log_provider_completed(
@@ -201,9 +183,9 @@ class FetchScheduler:
             "provider_completed",
             provider=provider,
             stage="fetch",
-            url=str(url),
+            url=target_url_for_log(str(url)),
             outcome=outcome,
-            elapsed_ms=max(0, int((self._monotonic() - started) * 1000)),
+            elapsed_ms=elapsed_ms(self._monotonic, started),
         )
 
     def _log_provider_failed(
@@ -219,9 +201,9 @@ class FetchScheduler:
             "provider_failed",
             provider=provider,
             stage="fetch",
-            url=str(url),
+            url=target_url_for_log(str(url)),
             error_type=type(exc).__name__,
-            elapsed_ms=max(0, int((self._monotonic() - started) * 1000)),
+            elapsed_ms=elapsed_ms(self._monotonic, started),
         )
 
     @staticmethod
