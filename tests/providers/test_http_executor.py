@@ -108,6 +108,7 @@ async def test_http_executor_classifies_invalid_json_as_protocol_failure_without
     assert "status=200" in logged
     assert "event=http_failed" in logged
     assert "category=decode" in logged
+    assert "elapsed_ms=" in logged
     assert "not-json" not in logged
 
 
@@ -137,7 +138,35 @@ async def test_http_executor_maps_non_retryable_http_error_to_execution_failure(
     assert "event=http_failed" in logged
     assert "category=status" in logged
     assert "status=401" in logged
+    assert "elapsed_ms=" in logged
     assert "do-not-log-response-body" not in logged
+
+
+async def test_http_executor_terminal_transport_failure_includes_elapsed_time() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("TERMINAL_TRANSPORT_SENTINEL", request=request)
+
+    logger, stream = structured_test_logger("tests.http.terminal-transport")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        executor = HttpJsonExecutor(
+            client,
+            RetryPolicy(1, 0.01, 0.02, 1.0),
+            provider_name="fake",
+            logger=logger,
+            sleep=_no_sleep,
+        )
+        with pytest.raises(ExecutionFailure):
+            await executor.request_json(
+                "GET",
+                "https://provider.example.test/data",
+                stage="fetch",
+            )
+
+    logged = stream.getvalue()
+    assert "event=http_failed" in logged
+    assert "category=transport" in logged
+    assert "elapsed_ms=" in logged
+    assert "TERMINAL_TRANSPORT_SENTINEL" not in logged
 
 
 async def test_http_executor_logs_transport_retry_without_exception_or_payload_text() -> None:

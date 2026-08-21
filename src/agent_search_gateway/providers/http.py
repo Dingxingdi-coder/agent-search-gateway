@@ -128,20 +128,34 @@ class HttpJsonExecutor:
                 on_retry=on_retry,
             )
         except _RetryableStatus as exc:
-            self._log_failed(stage, log_endpoint, attempt, "status", status=exc.status_code)
+            self._log_failed(
+                stage,
+                log_endpoint,
+                attempt,
+                attempt_started,
+                "status",
+                status=exc.status_code,
+            )
             raise self._execution_failure(stage, f"HTTP status {exc.status_code}") from exc
         except (httpx.TimeoutException, httpx.TransportError) as exc:
-            self._log_failed(stage, log_endpoint, attempt, "transport")
+            self._log_failed(stage, log_endpoint, attempt, attempt_started, "transport")
             raise self._execution_failure(stage, "HTTP transport failure") from exc
 
         if response.status_code >= 400:
-            self._log_failed(stage, log_endpoint, attempt, "status", status=response.status_code)
+            self._log_failed(
+                stage,
+                log_endpoint,
+                attempt,
+                attempt_started,
+                "status",
+                status=response.status_code,
+            )
             raise self._execution_failure(stage, f"HTTP status {response.status_code}")
 
         try:
             return response.json()
         except ValueError as exc:
-            self._log_failed(stage, log_endpoint, attempt, "decode")
+            self._log_failed(stage, log_endpoint, attempt, attempt_started, "decode")
             raise ProtocolFailure(
                 ErrorCode.PROTOCOL_ERROR,
                 f"{self._provider_name}/{stage}: response was not valid JSON",
@@ -152,10 +166,12 @@ class HttpJsonExecutor:
         stage: str,
         endpoint: str,
         attempt: int,
+        started: float,
         category: str,
         *,
         status: int | None = None,
     ) -> None:
+        attempt_elapsed_ms = elapsed_ms(self._monotonic, started)
         if status is None:
             log_event(
                 self._logger,
@@ -166,6 +182,7 @@ class HttpJsonExecutor:
                 endpoint=endpoint,
                 attempt=attempt,
                 category=category,
+                elapsed_ms=attempt_elapsed_ms,
             )
             return
         log_event(
@@ -178,6 +195,7 @@ class HttpJsonExecutor:
             attempt=attempt,
             category=category,
             status=status,
+            elapsed_ms=attempt_elapsed_ms,
         )
 
     async def aclose(self) -> None:
