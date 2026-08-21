@@ -65,6 +65,19 @@ def test_formatter_emits_structured_single_line_with_request_context() -> None:
     assert stream.getvalue().startswith("DEBUG request=- event=session_started ")
 
 
+def test_log_event_skips_validation_when_level_is_disabled() -> None:
+    stream = io.StringIO()
+    logger = _isolated_logger("tests.observability.disabled", stream, SecretRedactor())
+    logger.setLevel(logging.INFO)
+
+    log_event(logger, logging.DEBUG, "invalid event name")
+    assert stream.getvalue() == ""
+
+    logger.setLevel(logging.DEBUG)
+    with pytest.raises(ValueError, match="invalid log field name"):
+        log_event(logger, logging.DEBUG, "invalid event name")
+
+
 def test_log_url_helpers_preserve_target_diagnostics_without_auth_or_request_query() -> None:
     value = "https://user:password@example.com:8443/path?q=QUERY_SENTINEL#fragment"
 
@@ -103,10 +116,10 @@ def test_final_formatter_redacts_fields_and_exception_traceback() -> None:
 
 
 def test_secret_redactor_handles_multiple_additions_and_escaped_secret_text() -> None:
-    redactor = SecretRedactor([SecretValue("short"), SecretValue("")])
-    redactor.add_secrets([SecretValue("longer-secret"), SecretValue("line\nbreak")])
+    redactor = SecretRedactor([SecretValue("token"), SecretValue("")])
+    redactor.add_secrets([SecretValue("token-longer"), SecretValue("line\nbreak")])
 
-    rendered = redactor.redact("short longer-secret line\\nbreak")
+    rendered = redactor.redact("token-longer token line\\nbreak")
     assert rendered == "<redacted> <redacted> <redacted>"
 
 

@@ -46,6 +46,7 @@ class SecretRedactor:
 
     def __init__(self, secrets: Iterable[SecretValue] = ()) -> None:
         self._secrets: set[str] = set()
+        self._ordered_secrets: tuple[str, ...] = ()
         self.add_secrets(secrets)
 
     def add_secrets(self, secrets: Iterable[SecretValue]) -> None:
@@ -57,9 +58,10 @@ class SecretRedactor:
             escaped = json.dumps(value, ensure_ascii=False)[1:-1]
             if escaped:
                 self._secrets.add(escaped)
+        self._ordered_secrets = tuple(sorted(self._secrets, key=len, reverse=True))
 
     def redact(self, rendered: str) -> str:
-        for secret in sorted(self._secrets, key=len, reverse=True):
+        for secret in self._ordered_secrets:
             rendered = rendered.replace(secret, "<redacted>")
         return rendered
 
@@ -197,6 +199,8 @@ def log_event(
     exc_info: bool | BaseException = False,
     **fields: object,
 ) -> None:
+    if not logger.isEnabledFor(level):
+        return
     _validated_field_name(event)
     for name in fields:
         _validated_field_name(name)
