@@ -5,9 +5,11 @@ from agent_search_gateway.errors import ErrorCode, ExecutionFailure
 from agent_search_gateway.llm.stages import LLMStages
 from agent_search_gateway.models import LLMInvocation
 from agent_search_gateway.providers.contracts import ChatMessage, URLFetchCandidate
+from agent_search_gateway.request_ids import bind_request_id
 from agent_search_gateway.scheduler.fetch import FetchScheduler
 from agent_search_gateway.url_normalization import normalize_url
 from tests.support.fakes import FakeURLFetchProvider
+from tests.support.logging import structured_test_logger
 
 
 class _JudgeClient:
@@ -114,3 +116,104 @@ async def test_fetch_scheduler_classifies_execution_semantic_and_accepted_outcom
     stopped = await _scheduler([first_success, never_called]).fetch_until_accepted(url)
     assert stopped.kind == "accepted"
     assert never_called.calls == []
+
+
+async def test_fetch_scheduler_debug_events_cover_fallback_semantics_and_acceptance() -> None:
+    logger, stream = structured_test_logger("tests.fetch.scheduler-events")
+    invocation = LLMInvocation("judge", "judge-model", {})
+    stages = LLMStages(
+        {"judge": _JudgeClient()},
+        judge=invocation,
+        safety=invocation,
+        content_clean=invocation,
+        focus_summary=invocation,
+        logger=logger,
+    )
+    providers = [
+        FakeURLFetchProvider(
+            "failed",
+            failure=ExecutionFailure(
+                ErrorCode.ALL_PROVIDERS_FAILED,
+                "PROVIDER_FAILURE_SENTINEL",
+            ),
+        ),
+        FakeURLFetchProvider(
+            "semantic",
+            URLFetchCandidate(raw_content="judge-reject PAGE_REJECT_SENTINEL"),
+        ),
+        FakeURLFetchProvider(
+            "accepted",
+            URLFetchCandidate(
+                raw_content="PAGE_ACCEPT_SENTINEL",
+                content="CLEAN_ACCEPT_SENTINEL",
+            ),
+        ),
+    ]
+    quotas = ProviderQuotaManager(
+        web_limits={provider.name: 1 for provider in providers},
+        llm_limits={},
+    )
+    scheduler = FetchScheduler(providers, quotas, stages, logger=logger)
+    url = normalize_url("https://example.com/fetch?id=42&mode=test")
+
+    with bind_request_id("0badc0de"):
+        outcome = await scheduler.fetch_until_accepted(url)
+
+    assert outcome.kind == "accepted"
+    assert outcome.candidate == URLFetchCandidate(
+        raw_content="PAGE_ACCEPT_SENTINEL",
+        content="CLEAN_ACCEPT_SENTINEL",
+    )
+    assert [provider.calls for provider in providers] == [[url], [url], [url]]
+
+    logged = stream.getvalue()
+    lines = logged.splitlines()
+    assert all("request=0badc0de" in line for line in lines)
+    assert "url=https://example.com/fetch?id=42&mode=test" in logged
+    assert sum("event=provider_selected" in line for line in lines) == 3
+    assert any(
+        "event=provider_failed" in line
+        and "provider=failed" in line
+        and "error_type=ExecutionFailure" in line
+        for line in lines
+    )
+    assert any(
+        "event=provider_fallback" in line
+        and "provider=failed" in line
+        and "outcome=execution_failure" in line
+        for line in lines
+    )
+    assert any(
+        "event=body_rejected" in line
+        and "provider=semantic" in line
+        and "reason=judge_rejected" in line
+        for line in lines
+    )
+    assert "decision_reason=" not in logged
+    assert "reason=rejected" not in logged
+    assert any(
+        "event=provider_fallback" in line
+        and "provider=semantic" in line
+        and "outcome=semantic_failure" in line
+        for line in lines
+    )
+    assert any(
+        "event=body_accepted" in line
+        and "provider=accepted" in line
+        and "raw_chars=" in line
+        and "content_chars=" in line
+        for line in lines
+    )
+    assert any(
+        "event=provider_completed" in line
+        and "provider=accepted" in line
+        and "outcome=accepted" in line
+        for line in lines
+    )
+    for sentinel in (
+        "PROVIDER_FAILURE_SENTINEL",
+        "PAGE_REJECT_SENTINEL",
+        "PAGE_ACCEPT_SENTINEL",
+        "CLEAN_ACCEPT_SENTINEL",
+    ):
+        assert sentinel not in logged

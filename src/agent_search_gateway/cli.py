@@ -2,13 +2,15 @@
 
 import argparse
 import asyncio
+import os
 import signal
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Protocol, TextIO
 
 from .daemon import ForegroundDaemon
+from .doctor import DoctorReport, render_doctor, run_doctor
 from .errors import DaemonUnavailable, ErrorCode, GatewayError, InputFailure
 from .models import (
     ErrorResponse,
@@ -20,6 +22,7 @@ from .models import (
     SuccessResponse,
     URLFetchRequest,
 )
+from .observability import DebugLoggingSession, configure_debug_logging
 from .paths import RuntimePaths
 from .protocol import send_request
 from .url_normalization import normalize_url
@@ -35,14 +38,18 @@ class DaemonLike(Protocol):
     async def start(self) -> None: ...
 
 
-DaemonFactory = Callable[[RuntimePaths], DaemonLike]
+DaemonFactory = Callable[..., DaemonLike]
+LoggingConfigurer = Callable[..., DebugLoggingSession]
+DoctorRunner = Callable[..., Awaitable[DoctorReport]]
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-search-gateway")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("start")
+    start = subparsers.add_parser("start")
+    start.add_argument("--debug", action="store_true")
     subparsers.add_parser("stop")
+    subparsers.add_parser("doctor")
 
     keyword = subparsers.add_parser("keyword-search")
     keyword.add_argument("query")
@@ -88,15 +95,18 @@ async def run_command(
     *,
     client: SocketClient = send_request,
     daemon_factory: DaemonFactory = ForegroundDaemon,
+    logging_configurer: LoggingConfigurer = configure_debug_logging,
+    doctor_runner: DoctorRunner = run_doctor,
+    environ: Mapping[str, str] | None = None,
     stdout: TextIO,
     stderr: TextIO,
 ) -> int:
     if args.command == "start":
-        daemon = daemon_factory(paths)
         loop = asyncio.get_running_loop()
         current_task = asyncio.current_task()
         terminated = False
         signal_handler_installed = False
+        logging_session: DebugLoggingSession | None = None
 
         def cancel_for_sigterm() -> None:
             nonlocal terminated
@@ -105,11 +115,18 @@ async def run_command(
                 current_task.cancel()
 
         try:
-            loop.add_signal_handler(signal.SIGTERM, cancel_for_sigterm)
-            signal_handler_installed = True
-        except (NotImplementedError, RuntimeError, ValueError):
-            pass
-        try:
+            if args.debug:
+                logging_session = logging_configurer(paths.debug_log_file, stderr=stderr)
+            daemon = daemon_factory(
+                paths,
+                debug=args.debug,
+                logging_session=logging_session,
+            )
+            try:
+                loop.add_signal_handler(signal.SIGTERM, cancel_for_sigterm)
+                signal_handler_installed = True
+            except (NotImplementedError, RuntimeError, ValueError):
+                pass
             await daemon.start()
         except asyncio.CancelledError:
             if terminated:
@@ -121,7 +138,21 @@ async def run_command(
         finally:
             if signal_handler_installed:
                 loop.remove_signal_handler(signal.SIGTERM)
+            if logging_session is not None:
+                logging_session.close()
         return EXIT_OK
+
+    if args.command == "doctor":
+        try:
+            report = await doctor_runner(
+                paths,
+                environ=os.environ if environ is None else environ,
+            )
+        except Exception:
+            _write_text(stderr, "[fail] doctor internal error")
+            return EXIT_ERROR
+        render_doctor(report, stdout)
+        return report.exit_code
 
     try:
         request = _request_from_args(args)

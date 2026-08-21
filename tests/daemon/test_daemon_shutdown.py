@@ -20,7 +20,7 @@ class _SlowSearch:
         self.release = asyncio.Event()
         self.cancelled = asyncio.Event()
 
-    async def keyword_search(self, query: str) -> str:
+    async def keyword_search(self, query: str, *, request_id: str) -> str:
         self.entered.set()
         try:
             await self.release.wait()
@@ -29,7 +29,7 @@ class _SlowSearch:
             raise
         return f"keyword:{query}"
 
-    async def llm_search(self, prompt: str) -> str:
+    async def llm_search(self, prompt: str, *, request_id: str) -> str:
         return f"llm:{prompt}"
 
 

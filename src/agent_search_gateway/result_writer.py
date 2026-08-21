@@ -1,14 +1,12 @@
-"""Unique compact JSONL result files for search commands."""
+"""Compact JSONL persistence for search command results."""
 
 import json
-import secrets
 from collections.abc import Iterable
+from contextlib import suppress
 from pathlib import Path
-from typing import Literal
 
 from .models import SearchRecord
-
-ResultKind = Literal["keyword", "llm"]
+from .request_ids import ResultKind, result_filename
 
 
 def _serialize_record(record: SearchRecord) -> str:
@@ -26,16 +24,27 @@ class ResultWriter:
     def __init__(self, results_dir: Path) -> None:
         self._results_dir = results_dir
 
-    def write_results(self, kind: ResultKind, records: Iterable[SearchRecord]) -> Path:
-        self._results_dir.mkdir(parents=True, exist_ok=True)
+    def write_results(
+        self,
+        kind: ResultKind,
+        records: Iterable[SearchRecord],
+        *,
+        request_id: str,
+    ) -> Path:
+        filename = result_filename(kind, request_id)
         serialized = tuple(_serialize_record(record) for record in records)
-        while True:
-            target = self._results_dir / f"{kind}-{secrets.token_hex(4)}.jsonl"
-            try:
-                with target.open("x", encoding="utf-8", newline="\n") as handle:
-                    for line in serialized:
-                        handle.write(line)
-                        handle.write("\n")
-                return target.resolve()
-            except FileExistsError:
-                continue
+        self._results_dir.mkdir(parents=True, exist_ok=True)
+        target = self._results_dir / filename
+        created = False
+        try:
+            with target.open("x", encoding="utf-8", newline="\n") as handle:
+                created = True
+                for line in serialized:
+                    handle.write(line)
+                    handle.write("\n")
+            return target.resolve()
+        except BaseException:
+            if created:
+                with suppress(OSError):
+                    target.unlink()
+            raise

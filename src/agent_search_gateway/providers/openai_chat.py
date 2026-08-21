@@ -2,12 +2,13 @@
 
 import asyncio
 import json
+import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 
 from ..concurrency import CapacityGate
 from ..errors import ErrorCode, ExecutionFailure, ProtocolFailure
 from ..models import LLMInvocation, RetryPolicy
-from ..observability import SecretValue
+from ..observability import SecretValue, log_event
 from ..retry import retry_async
 from .contracts import ChatMessage
 from .http import HttpJsonExecutor
@@ -26,6 +27,7 @@ class OpenAIChatCompletionsClient:
         quota: CapacityGate,
         retry_policy: RetryPolicy,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        logger: logging.Logger | None = None,
     ) -> None:
         self.name = name
         self._endpoint = f"{api_url.rstrip('/')}/v1/chat/completions"
@@ -34,6 +36,7 @@ class OpenAIChatCompletionsClient:
         self._quota = quota
         self._retry_policy = retry_policy
         self._sleep = sleep
+        self._logger = logger or logging.getLogger(__name__)
 
     async def complete_text(
         self,
@@ -47,12 +50,26 @@ class OpenAIChatCompletionsClient:
             return self._extract_content(payload)
 
         async with self._quota.lease():
-            return await retry_async(
+            result = await retry_async(
                 self._retry_policy,
                 operation,
                 is_retryable=lambda exc: isinstance(exc, ProtocolFailure),
                 sleep=self._sleep,
+                before_attempt=lambda attempt: self._log_protocol_attempt(
+                    invocation,
+                    messages,
+                    attempt,
+                ),
+                on_retry=lambda attempt, exc, delay: self._log_protocol_retry(
+                    invocation,
+                    messages,
+                    attempt,
+                    exc,
+                    delay,
+                ),
             )
+        self._log_protocol_completed(invocation, messages, output_chars=len(result))
+        return result
 
     async def complete_json(
         self,
@@ -73,12 +90,104 @@ class OpenAIChatCompletionsClient:
             return decoded
 
         async with self._quota.lease():
-            return await retry_async(
+            result = await retry_async(
                 self._retry_policy,
                 operation,
                 is_retryable=lambda exc: isinstance(exc, ProtocolFailure),
                 sleep=self._sleep,
+                before_attempt=lambda attempt: self._log_protocol_attempt(
+                    invocation,
+                    messages,
+                    attempt,
+                ),
+                on_retry=lambda attempt, exc, delay: self._log_protocol_retry(
+                    invocation,
+                    messages,
+                    attempt,
+                    exc,
+                    delay,
+                ),
             )
+        output_chars = len(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+        self._log_protocol_completed(invocation, messages, output_chars=output_chars)
+        return result
+
+    def _log_protocol_attempt(
+        self,
+        invocation: LLMInvocation,
+        messages: Sequence[ChatMessage],
+        attempt: int,
+    ) -> None:
+        message_count, input_chars, extra_body_keys = self._protocol_metadata(invocation, messages)
+        log_event(
+            self._logger,
+            logging.DEBUG,
+            "provider_started",
+            provider=self.name,
+            stage="llm",
+            model=invocation.model,
+            message_count=message_count,
+            input_chars=input_chars,
+            extra_body_keys=extra_body_keys,
+            attempt=attempt,
+        )
+
+    def _log_protocol_retry(
+        self,
+        invocation: LLMInvocation,
+        messages: Sequence[ChatMessage],
+        attempt: int,
+        exc: BaseException,
+        delay: float,
+    ) -> None:
+        message_count, input_chars, extra_body_keys = self._protocol_metadata(invocation, messages)
+        log_event(
+            self._logger,
+            logging.DEBUG,
+            "provider_failed",
+            provider=self.name,
+            stage="llm",
+            model=invocation.model,
+            message_count=message_count,
+            input_chars=input_chars,
+            extra_body_keys=extra_body_keys,
+            attempt=attempt,
+            error_type=type(exc).__name__,
+            delay_ms=max(0, int(delay * 1000)),
+            reason="protocol_retry",
+        )
+
+    def _log_protocol_completed(
+        self,
+        invocation: LLMInvocation,
+        messages: Sequence[ChatMessage],
+        *,
+        output_chars: int,
+    ) -> None:
+        message_count, input_chars, extra_body_keys = self._protocol_metadata(invocation, messages)
+        log_event(
+            self._logger,
+            logging.DEBUG,
+            "provider_completed",
+            provider=self.name,
+            stage="llm",
+            model=invocation.model,
+            message_count=message_count,
+            input_chars=input_chars,
+            extra_body_keys=extra_body_keys,
+            output_chars=output_chars,
+        )
+
+    @staticmethod
+    def _protocol_metadata(
+        invocation: LLMInvocation,
+        messages: Sequence[ChatMessage],
+    ) -> tuple[int, int, str]:
+        return (
+            len(messages),
+            sum(len(value) for message in messages for value in message.values()),
+            ",".join(sorted(invocation.extra_body)) or "-",
+        )
 
     async def aclose(self) -> None:
         await self._executor.aclose()

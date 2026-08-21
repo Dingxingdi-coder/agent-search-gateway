@@ -45,11 +45,11 @@ def _orchestrator(
 
 async def test_keyword_search_uses_pipeline_completion_rules(tmp_path: Path) -> None:
     with pytest.raises(InputFailure) as empty:
-        await _orchestrator(tmp_path, []).keyword_search("   ")
+        await _orchestrator(tmp_path, []).keyword_search("   ", request_id="00000001")
     assert empty.value.code is ErrorCode.EMPTY_QUERY
 
     with pytest.raises(ExecutionFailure) as absent:
-        await _orchestrator(tmp_path, []).keyword_search("query")
+        await _orchestrator(tmp_path, []).keyword_search("query", request_id="00000002")
     assert absent.value.code is ErrorCode.NO_KEYWORD_SEARCH_PROVIDERS
 
     failed = FakeKeywordSearchProvider(
@@ -61,7 +61,7 @@ async def test_keyword_search_uses_pipeline_completion_rules(tmp_path: Path) -> 
         [KeywordSearchHit("https://example.com/a", snippet="A")],
     )
     orchestrator = _orchestrator(tmp_path, [failed, success])
-    path = Path(await orchestrator.keyword_search(" query "))
+    path = Path(await orchestrator.keyword_search(" query ", request_id="00000003"))
     assert path.exists()
     assert path.read_text(encoding="utf-8") == '{"url":"https://example.com/a","abstract":"A"}\n'
     assert failed.calls == ["query"]
@@ -70,7 +70,11 @@ async def test_keyword_search_uses_pipeline_completion_rules(tmp_path: Path) -> 
     assert orchestrator.quotas.get_web("success").max_observed_in_use == 1
 
     empty_provider = FakeKeywordSearchProvider("empty", [])
-    empty_path = Path(await _orchestrator(tmp_path, [empty_provider]).keyword_search("query"))
+    empty_path = Path(
+        await _orchestrator(tmp_path, [empty_provider]).keyword_search(
+            "query", request_id="00000004"
+        )
+    )
     assert empty_path.exists()
     assert empty_path.read_text(encoding="utf-8") == ""
 
@@ -91,7 +95,7 @@ async def test_keyword_search_uses_pipeline_completion_rules(tmp_path: Path) -> 
     )
     before = set((tmp_path / "results").glob("keyword-*.jsonl"))
     with pytest.raises(ExecutionFailure) as all_failed_error:
-        await all_failed.keyword_search("query")
+        await all_failed.keyword_search("query", request_id="00000005")
     after = set((tmp_path / "results").glob("keyword-*.jsonl"))
     assert all_failed_error.value.code is ErrorCode.ALL_PROVIDERS_FAILED
     assert after == before
