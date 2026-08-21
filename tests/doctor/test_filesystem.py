@@ -41,6 +41,26 @@ def test_directory_probe_rejects_non_directory_without_mutation(tmp_path: Path) 
     assert occupied.read_text(encoding="utf-8") == "unchanged"
 
 
+def test_directory_probe_rejects_dangling_symlink_targets_and_parents(tmp_path: Path) -> None:
+    dangling_target = tmp_path / "dangling-target"
+    dangling_target.symlink_to(tmp_path / "missing-target", target_is_directory=True)
+
+    target_check = probe_directory_writable(dangling_target)
+
+    assert target_check.status is DoctorStatus.FAIL
+    assert "non-directory" in target_check.message
+    assert dangling_target.is_symlink()
+
+    dangling_parent = tmp_path / "dangling-parent"
+    dangling_parent.symlink_to(tmp_path / "missing-parent", target_is_directory=True)
+
+    parent_check = probe_directory_writable(dangling_parent / "nested")
+
+    assert parent_check.status is DoctorStatus.FAIL
+    assert str(dangling_parent) in parent_check.message
+    assert dangling_parent.is_symlink()
+
+
 async def test_doctor_aggregates_directory_failures_and_leaves_no_runtime_artifacts(
     tmp_path: Path,
 ) -> None:

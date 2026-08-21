@@ -65,23 +65,40 @@ def render_doctor(report: DoctorReport, stream: TextIO) -> None:
 
 
 def probe_directory_writable(path: Path) -> DoctorCheck:
-    if path.exists():
-        if not path.is_dir():
+    candidate = path
+    while True:
+        try:
+            candidate.lstat()
+        except FileNotFoundError:
+            parent = candidate.parent
+            if parent == candidate:
+                return DoctorCheck(
+                    DoctorStatus.FAIL,
+                    f"directory has no existing parent: {path}",
+                )
+            candidate = parent
+            continue
+        except OSError as exc:
+            return DoctorCheck(
+                DoctorStatus.FAIL,
+                f"unable to inspect directory path: {path}: {_safe_os_reason(exc)}",
+            )
+        break
+
+    if not candidate.is_dir():
+        if candidate == path:
             return DoctorCheck(
                 DoctorStatus.FAIL,
                 f"expected directory but found non-directory: {path}",
             )
-        return _probe_existing_directory(path, target=path)
-
-    parent = path.parent
-    while not parent.exists() and parent != parent.parent:
-        parent = parent.parent
-    if not parent.exists() or not parent.is_dir():
         return DoctorCheck(
             DoctorStatus.FAIL,
-            f"directory cannot be created because parent is not a directory: {path}",
+            f"directory cannot be created because parent is not a directory: {candidate}",
         )
-    probed = _probe_existing_directory(parent, target=path)
+    if candidate == path:
+        return _probe_existing_directory(path, target=path)
+
+    probed = _probe_existing_directory(candidate, target=path)
     if probed.status is DoctorStatus.OK:
         return DoctorCheck(DoctorStatus.OK, f"directory is creatable: {path}")
     return probed
