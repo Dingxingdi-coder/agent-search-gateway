@@ -114,6 +114,41 @@ async def test_retry_engine_optional_hooks_observe_attempt_and_retry_order() -> 
     ]
 
 
+async def test_retry_hook_failures_do_not_change_retry_execution() -> None:
+    policy = resolve_retry_policy({})
+    calls = 0
+    sleeps: list[float] = []
+
+    async def operation() -> str:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ExecutionFailure(ErrorCode.ALL_PROVIDERS_FAILED, "retryable")
+        return "done"
+
+    def broken_before_attempt(_attempt: int) -> None:
+        raise RuntimeError("before-attempt hook failed")
+
+    def broken_on_retry(_attempt: int, _exc: BaseException, _delay: float) -> None:
+        raise RuntimeError("retry hook failed")
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    result = await retry_async(
+        policy,
+        operation,
+        is_retryable=lambda exc: isinstance(exc, ExecutionFailure),
+        sleep=fake_sleep,
+        before_attempt=broken_before_attempt,
+        on_retry=broken_on_retry,
+    )
+
+    assert result == "done"
+    assert calls == 2
+    assert sleeps == [0.25]
+
+
 async def test_retry_hooks_do_not_reclassify_non_retryable_or_cancelled_failures() -> None:
     policy = resolve_retry_policy({})
     attempts: list[int] = []

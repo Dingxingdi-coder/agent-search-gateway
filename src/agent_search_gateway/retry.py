@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from typing import TypeVar
 
 from .models import RetryPolicy
@@ -22,7 +23,8 @@ async def retry_async(
 ) -> T:
     for attempt in range(1, policy.max_attempts + 1):
         if before_attempt is not None:
-            before_attempt(attempt)
+            with suppress(Exception):
+                before_attempt(attempt)
         try:
             return await operation()
         except BaseException as exc:
@@ -35,6 +37,7 @@ async def retry_async(
                 policy.max_delay_seconds,
             )
             if on_retry is not None:
-                on_retry(attempt, exc, delay)
+                with suppress(Exception):
+                    on_retry(attempt, exc, delay)
             await sleep(delay)
     raise RuntimeError("retry loop exhausted unexpectedly")

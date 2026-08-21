@@ -229,6 +229,26 @@ def test_configure_close_configure_does_not_duplicate_owned_handlers(tmp_path: P
     assert tuple(project_logger.handlers) == baseline
 
 
+@pytest.mark.parametrize(
+    ("max_bytes", "backup_count"),
+    [(0, LOG_BACKUP_COUNT), (LOG_MAX_BYTES, -1)],
+)
+def test_configure_debug_logging_rejects_invalid_rotation_limits(
+    tmp_path: Path,
+    max_bytes: int,
+    backup_count: int,
+) -> None:
+    with pytest.raises(ConfigFailure) as failure:
+        configure_debug_logging(
+            tmp_path / "debug.log",
+            stderr=io.StringIO(),
+            max_bytes=max_bytes,
+            backup_count=backup_count,
+        )
+
+    assert failure.value.code is ErrorCode.CONFIG_ERROR
+
+
 def test_logging_setup_failure_is_config_error_and_restores_logger(tmp_path: Path) -> None:
     project_logger = logging.getLogger("agent_search_gateway")
     original_level = project_logger.level

@@ -1,3 +1,4 @@
+import os
 from io import StringIO
 from pathlib import Path
 from typing import cast
@@ -335,6 +336,39 @@ async def test_doctor_runs_locally_renders_all_checks_and_uses_report_exit_code(
         "[info] daemon not running\n"
         "[fail] synthetic failure\n"
     )
+    assert stderr.getvalue() == ""
+
+
+async def test_doctor_uses_process_environ_by_default_without_mutation(tmp_path: Path) -> None:
+    parser = build_parser()
+    paths = RuntimePaths.from_home(tmp_path)
+    original_environ = dict(os.environ)
+    recorded_environ: dict[str, str] | None = None
+
+    async def recording_runner(
+        received_paths: RuntimePaths,
+        *,
+        environ: dict[str, str],
+    ) -> DoctorReport:
+        nonlocal recorded_environ
+        assert received_paths == paths
+        recorded_environ = dict(environ)
+        return DoctorReport((DoctorCheck(DoctorStatus.OK, "configuration valid"),))
+
+    stdout = StringIO()
+    stderr = StringIO()
+    code = await run_command(
+        parser.parse_args(["doctor"]),
+        paths,
+        doctor_runner=recording_runner,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert code == 0
+    assert recorded_environ == original_environ
+    assert dict(os.environ) == original_environ
+    assert stdout.getvalue() == "[ok] configuration valid\n"
     assert stderr.getvalue() == ""
 
 
