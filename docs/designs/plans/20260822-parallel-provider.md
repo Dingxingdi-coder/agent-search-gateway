@@ -200,7 +200,7 @@ Add:
 
 ```text
 test_parallel_search_includes_configured_mode
-  parameterized over turbo/basic/advanced
+  parameterized over turbo/fast/basic/advanced
 
 test_parallel_search_omits_mode_when_not_configured
 
@@ -634,6 +634,7 @@ Test valid `mode` values:
 ```text
 None
 turbo
+fast
 basic
 advanced
 ```
@@ -641,7 +642,6 @@ advanced
 Reject invalid mode values:
 
 ```text
-fast
 ADVANCED
 empty string
 integer
@@ -716,7 +716,7 @@ Constructor mode validation:
 ```text
 if mode is not None:
   require str
-  require mode in {turbo, basic, advanced}
+  require mode in {turbo, fast, basic, advanced}
 ```
 
 Do not add undocumented numeric restrictions. Do not add a provider-specific config exception type; `Runtime._build_web_providers()` already converts constructor `TypeError` to the existing startup `ConfigFailure`.
@@ -954,7 +954,7 @@ Search smoke scenario:
 construct real HttpJsonExecutor + ParallelAdapter
 api_url = https://api.parallel.ai
 search for "OpenAI official website"
-assert the return value is a list
+assert the return value is a non-empty list
 assert each returned hit has string url/title/snippet
 assert no exact result count, ordering, URL, title, or snippet text
 ```
@@ -1059,7 +1059,7 @@ Do not add retry logic in the test; exercise the production `HttpJsonExecutor` b
 | `x-api-key` authentication through existing secret boundary | 1, 4 |
 | Search maps exactly one gateway query to `search_queries=[query]` | 1 |
 | No objective, query rewriting, max-results control, or session coupling | 1, 4, 9, 10 |
-| Optional mode `turbo`/`basic`/`advanced`; omission sends no mode | 2, 7 |
+| Optional mode `turbo`/`fast`/`basic`/`advanced`; omission sends no mode | 2, 7 |
 | Independent Search/Extract FetchPolicy options | 2, 5, 7 |
 | Exact FetchPolicy key/type/range validation | 7 |
 | Search excerpts join with `\n\n` into snippet only | 1, 3 |
@@ -1124,7 +1124,7 @@ Reuse `tests/support/http.py::RecordingJsonExecutor`; do not add another HTTP mo
 - Constructor policy parameters stay `Mapping[str, object] | None`; validated copies become adapter-owned `dict[str, object] | None`.
 - Policy field names remain exactly `max_age_seconds`, `timeout_seconds`, and `disable_cache_fallback` from validation through request construction.
 - Search uses `search_fetch_policy`; Extract uses `extract_fetch_policy`; neither aliases the other.
-- `mode` is optional and validated against exactly `turbo`, `basic`, and `advanced`.
+- `mode` is optional and validated against exactly `turbo`, `fast`, `basic`, and `advanced`.
 - `api_url` remains a required provider-specific constructor option; no additional Parallel-only URL validator is introduced beyond established repository patterns.
 - No new gateway request type, response type, model field, `ErrorCode`, quota type, scheduler outcome, URL-store field, or result-file field is introduced.
 

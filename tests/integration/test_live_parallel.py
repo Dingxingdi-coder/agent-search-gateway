@@ -38,6 +38,7 @@ async def test_live_parallel_search_response_shape() -> None:
         hits = await adapter.search("OpenAI official website")
 
     assert isinstance(hits, list)
+    assert hits
     for hit in hits:
         assert isinstance(hit.url, str)
         assert isinstance(hit.title, str)

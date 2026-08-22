@@ -52,7 +52,7 @@ Handling:
 
 Condition:
 
-- `mode` is provided but is not one of `turbo`, `basic`, or `advanced`, or is not a string.
+- `mode` is provided but is not one of `turbo`, `fast`, `basic`, or `advanced`, or is not a string.
 
 Handling:
 

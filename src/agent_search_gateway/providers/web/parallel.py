@@ -18,7 +18,7 @@ from .common import (
     require_string,
 )
 
-_VALID_MODES = frozenset({"turbo", "basic", "advanced"})
+_VALID_MODES = frozenset({"turbo", "fast", "basic", "advanced"})
 _FETCH_POLICY_KEYS = frozenset(
     {"max_age_seconds", "timeout_seconds", "disable_cache_fallback"}
 )
@@ -27,7 +27,7 @@ _MIN_MAX_AGE_SECONDS = 600
 
 def _validate_mode(value: str | None) -> str | None:
     if value is not None and (not isinstance(value, str) or value not in _VALID_MODES):
-        raise TypeError("mode must be turbo, basic, advanced, or None")
+        raise TypeError("mode must be turbo, fast, basic, advanced, or None")
     return value
 
 

@@ -9,7 +9,7 @@
 - Authenticate Parallel requests with the existing provider secret mechanism and the Parallel `x-api-key` request header.
 - Map gateway `keyword_search(query)` to Parallel `search_queries=[query]`; do not synthesize or expose `objective` in this version.
 - Leave Parallel result count at the provider default; do not expose `max_results` in this version.
-- Support optional Parallel Search `mode` values `turbo`, `basic`, and `advanced`; omit `mode` from the provider request when it is not configured.
+- Support optional Parallel Search `mode` values `turbo`, `fast`, `basic`, and `advanced`; omit `mode` from the provider request when it is not configured.
 - Support independent optional `search_fetch_policy` and `extract_fetch_policy` provider-specific configuration.
 - Support all current Parallel `FetchPolicy` fields: `max_age_seconds`, `timeout_seconds`, and `disable_cache_fallback`, with adapter-local field, type, and documented-range validation.
 - Map `search_fetch_policy` to `/v1/search` `advanced_settings.fetch_policy` and `extract_fetch_policy` to `/v1/extract` `advanced_settings.fetch_policy`.
@@ -29,7 +29,7 @@
 
 #### Assumptions
 - Parallel's current V1 contract remains `POST /v1/search` and `POST /v1/extract` under the configured `api_url`, with `x-api-key` authentication.
-- Parallel Search requires at least one `search_queries` item and accepts `mode` values `turbo`, `basic`, and `advanced`; omitted mode uses the provider default.
+- Parallel Search requires at least one `search_queries` item and accepts `mode` values `turbo`, `fast`, `basic`, and `advanced`; omitted mode uses the provider default.
 - Parallel Search results provide `url`, optional `title`, and `excerpts`; results are already ordered by provider relevance.
 - Parallel Extract accepts one or more URLs, but the gateway's `URLFetchProvider.fetch()` contract remains one normalized URL per call.
 - Parallel Extract returns requested full-page content as Markdown in `full_content` when `advanced_settings.full_content=true` is used.
@@ -134,7 +134,7 @@ Parallel is added as one more built-in web adapter behind the existing `KeywordS
 
 ##### Expose Optional Search Mode Without Forcing a Default
 
-- Description: Allow optional `mode = "turbo" | "basic" | "advanced"`. If omitted, do not include the field in the Parallel request.
+- Description: Allow optional `mode = "turbo" | "fast" | "basic" | "advanced"`. If omitted, do not include the field in the Parallel request.
 - Rationale: Mode materially controls provider search behavior/cost/latency, while omission lets Parallel own its documented default and prevents the gateway from copying a provider default into its compatibility contract.
 - Trade-offs: Effective behavior can change if Parallel changes its default in a future API revision.
 - Rejected Alternatives:
@@ -305,7 +305,7 @@ ForegroundDaemon.start
        )
        ParallelAdapter validates:
          api_url shape required by constructor
-         mode, if present, is turbo/basic/advanced
+         mode, if present, is turbo/fast/basic/advanced
          each fetch policy is a mapping
          each policy contains only supported keys
          max_age_seconds is int >= 600 when present
@@ -496,7 +496,7 @@ Partial policy objects are valid. Missing fields are omitted so Parallel applies
 ```json
 {
   "search_queries": ["<gateway keyword query>"],
-  "mode": "<optional turbo|basic|advanced>",
+  "mode": "<optional turbo|fast|basic|advanced>",
   "advanced_settings": {
     "fetch_policy": {
       "max_age_seconds": 3600,

@@ -165,6 +165,7 @@ Parameterize over:
 
 ```text
 turbo
+fast
 basic
 advanced
 ```
@@ -380,14 +381,13 @@ Most nested validation should be tested directly against `ParallelAdapter` becau
 
 #### Valid Mode
 
-Parameterize valid `turbo`, `basic`, `advanced` and omission.
+Parameterize valid `turbo`, `fast`, `basic`, `advanced` and omission.
 
 #### Invalid Mode
 
 Parameterize examples:
 
 ```text
-"fast"
 "ADVANCED"
 ""
 1
@@ -635,7 +635,7 @@ OpenAI official website
 
 Assert only contract-level invariants:
 
-- result is a list;
+- result is a non-empty list;
 - each returned hit has string `url`, `title`, and `snippet` fields;
 - no exact result count, ordering, URL, or snippet text is asserted.
 

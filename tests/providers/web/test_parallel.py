@@ -75,7 +75,7 @@ async def test_parallel_search_builds_minimal_v1_request_and_maps_excerpts() -> 
     assert "advanced_settings" not in request.json_body
 
 
-@pytest.mark.parametrize("mode", ["turbo", "basic", "advanced"])
+@pytest.mark.parametrize("mode", ["turbo", "fast", "basic", "advanced"])
 async def test_parallel_search_includes_configured_mode(mode: str) -> None:
     executor = RecordingJsonExecutor([{"results": []}])
     adapter = ParallelAdapter(
@@ -562,7 +562,7 @@ async def test_parallel_extract_malformed_top_level_response_fails(payload: obje
         await adapter.fetch(normalize_url("https://example.com/parallel"))
 
 
-@pytest.mark.parametrize("mode", [None, "turbo", "basic", "advanced"])
+@pytest.mark.parametrize("mode", [None, "turbo", "fast", "basic", "advanced"])
 def test_parallel_accepts_valid_mode(mode: str | None) -> None:
     ParallelAdapter(
         name="parallel",
@@ -573,7 +573,7 @@ def test_parallel_accepts_valid_mode(mode: str | None) -> None:
     )
 
 
-@pytest.mark.parametrize("invalid", ["fast", "ADVANCED", "", 1, True, {}])
+@pytest.mark.parametrize("invalid", ["ADVANCED", "", 1, True, {}])
 def test_parallel_invalid_mode_raises_type_error(invalid: object) -> None:
     with pytest.raises(TypeError):
         ParallelAdapter(
