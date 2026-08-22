@@ -113,6 +113,49 @@ async def test_unpaywall_skips_invalid_best_location_for_valid_alternate() -> No
     assert resolved.license == "cc-by"
 
 
+async def test_unpaywall_uses_normalized_landing_fallback_and_pdf_ranking() -> None:
+    landing_fallback = {
+        "is_oa": True,
+        "oa_status": "green",
+        "best_oa_location": {
+            "url_for_landing_page": "not-a-url",
+            "url": "https://best.example/generic",
+            "url_for_pdf": None,
+        },
+        "oa_locations": [],
+    }
+    ranked_alternates = {
+        "is_oa": True,
+        "oa_status": "green",
+        "best_oa_location": None,
+        "oa_locations": [
+            {
+                "url_for_pdf": "ftp://invalid.example/paper.pdf",
+                "url": "https://a.example/landing",
+            },
+            {
+                "url_for_pdf": "https://z.example/paper.pdf",
+                "url": "https://z.example/landing",
+            },
+        ],
+    }
+    executor = RecordingJsonExecutor([landing_fallback, ranked_alternates])
+    resolver = UnpaywallResolver(
+        executor,
+        contact_email=SecretValue("[REDACTED_SECRET]"),
+    )
+
+    first = await resolver.resolve("10.1000/landing-fallback")
+    second = await resolver.resolve("10.1000/pdf-ranking")
+
+    assert first is not None
+    assert str(first.landing_url) == "https://best.example/generic"
+    assert first.pdf_url is None
+    assert second is not None
+    assert str(second.landing_url) == "https://z.example/landing"
+    assert str(second.pdf_url) == "https://z.example/paper.pdf"
+
+
 async def test_unpaywall_non_oa_and_404_are_normal_results() -> None:
     executor = RecordingJsonExecutor(
         [

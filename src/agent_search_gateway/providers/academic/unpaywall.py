@@ -114,11 +114,15 @@ class UnpaywallResolver:
             or cls._location_url(location, landing=False) is not None
         )
 
-    @staticmethod
-    def _location_sort_key(location: Mapping[str, object]) -> tuple[int, str, str]:
-        pdf = text(location.get("url_for_pdf"))
-        landing = text(location.get("url_for_landing_page")) or text(location.get("url"))
-        return (0 if pdf else 1, pdf, landing)
+    @classmethod
+    def _location_sort_key(cls, location: Mapping[str, object]) -> tuple[int, str, str]:
+        pdf = cls._location_url(location, landing=False)
+        landing = cls._location_url(location, landing=True)
+        return (
+            0 if pdf is not None else 1,
+            str(pdf) if pdf is not None else "",
+            str(landing) if landing is not None else "",
+        )
 
     @classmethod
     def _location_url(
@@ -129,13 +133,19 @@ class UnpaywallResolver:
     ) -> NormalizedURL | None:
         if location is None:
             return None
-        if landing:
-            raw = text(location.get("url_for_landing_page")) or text(location.get("url"))
-        else:
-            raw = text(location.get("url_for_pdf"))
-        if not raw:
-            return None
-        try:
-            return normalize_url(raw)
-        except InputFailure:
-            return None
+        raw_values = (
+            (
+                text(location.get("url_for_landing_page")),
+                text(location.get("url")),
+            )
+            if landing
+            else (text(location.get("url_for_pdf")),)
+        )
+        for raw in raw_values:
+            if not raw:
+                continue
+            try:
+                return normalize_url(raw)
+            except InputFailure:
+                continue
+        return None
