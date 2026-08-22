@@ -29,7 +29,14 @@ async def test_runtime_instantiates_only_enabled_academic_providers_in_configure
     resolved = resolve_config(
         raw,
         web_registry,
-        {"ENV_A": "x", "ENV_B": "x", "ENV_C": "x", "ENV_D": "x", "ENV_E": "x"},
+        {
+            "ENV_A": "x",
+            "ENV_B": "x",
+            "ENV_C": "x",
+            "ENV_D": "x",
+            "ENV_E": "x",
+            "ENV_F": "x",
+        },
         academic_registry=academic_registry,
         oa_resolver_registry=resolver_registry,
     )

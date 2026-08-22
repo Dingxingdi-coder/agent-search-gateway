@@ -293,6 +293,7 @@ async def test_runtime_assembles_all_academic_providers_resolver_and_closes_once
         "ENV_C": "x",
         "ENV_D": "x",
         "ENV_E": "x",
+        "ENV_F": "x",
         "OA_CONTACT": "[REDACTED_SECRET]",
     }
     resolved = resolve_config(
@@ -336,5 +337,5 @@ async def test_runtime_assembles_all_academic_providers_resolver_and_closes_once
 
     await runtime.aclose()
     await runtime.aclose()
-    assert len(clients) == 12
+    assert len(clients) == 13
     assert all(client.close_calls == 1 for client in clients)
