@@ -16,9 +16,12 @@ def _fixture(name: str) -> object:
     return json.loads((FIXTURES / name).read_text())
 
 
-async def test_core_maps_works_with_no_auth_when_omitted() -> None:
+async def test_core_maps_works_with_required_bearer_auth() -> None:
     executor = RecordingJsonExecutor([_fixture("search.json")])
-    hits = await CoreProvider(executor).search("repositories")
+    hits = await CoreProvider(
+        executor,
+        api_key=SecretValue("[REDACTED_SECRET]"),
+    ).search("repositories")
 
     assert len(hits) == 2
     hit = hits[0]
@@ -39,11 +42,11 @@ async def test_core_maps_works_with_no_auth_when_omitted() -> None:
     request = executor.requests[0]
     assert request.method == "GET"
     assert request.url == "https://api.core.ac.uk/v3/search/works"
-    assert request.headers is None
+    assert request.headers == {"Authorization": "Bearer [REDACTED_SECRET]"}
     assert request.params == {"q": "repositories", "limit": 10, "offset": 0}
 
 
-async def test_core_optional_bearer_is_sent_without_fallback() -> None:
+async def test_core_bearer_is_sent_without_authentication_fallback() -> None:
     executor = RecordingJsonExecutor([{"results": []}])
     provider = CoreProvider(executor, api_key=SecretValue("[REDACTED_SECRET]"))
     await provider.search("query")
@@ -60,5 +63,7 @@ async def test_core_optional_bearer_is_sent_without_fallback() -> None:
 async def test_core_invalid_results_envelope_is_protocol_failure() -> None:
     executor = RecordingJsonExecutor([_fixture("malformed.json")])
     with pytest.raises(ProtocolFailure) as caught:
-        await CoreProvider(executor).search("query")
+        await CoreProvider(executor, api_key=SecretValue("[REDACTED_SECRET]")).search(
+            "query"
+        )
     assert caught.value.code is ErrorCode.PROTOCOL_ERROR

@@ -19,7 +19,7 @@ Use `openags/paper-search-mcp` for endpoint and field-mapping knowledge only. Do
 - Do not expose Unpaywall as keyword discovery; it is a DOI resolver after deduplication.
 - Do not add runtime dependencies; parse arXiv/dblp XML with the standard library.
 
-Use a separate `[academic_providers]` group with per-provider `enabled`, `max_concurrency`, `api_url`, optional `api_key_env`, and optional `contact_email_env` according to registration policy. Use a separate `[oa_resolvers.unpaywall]` group. Configuration examples that need environment-variable values must use placeholders such as `[REDACTED_SECRET]`; omitting an optional `*_env` field means unauthenticated/no-contact operation, while explicitly naming an environment variable that resolves empty is `CONFIG_ERROR`. Built-in CORE is optional-authentication; the generic resolver still supports required-authentication registrations for validation tests.
+Use a separate `[academic_providers]` group with per-provider `enabled`, `max_concurrency`, `api_url`, optional or required `api_key_env`, and optional `contact_email_env` according to registration policy. Use a separate `[oa_resolvers.unpaywall]` group. Configuration examples that need environment-variable values must use placeholders such as `[REDACTED_SECRET]`; omitting an optional `*_env` field means unauthenticated/no-contact operation, while omitting a required field or naming an environment variable that resolves empty is `CONFIG_ERROR`. Built-in CORE requires authentication; Semantic Scholar keeps optional authentication; the generic resolver supports the same policy distinctions for validation tests.
 
 ### Task 1: Academic domain contracts and pure identifier normalization
 
@@ -376,7 +376,7 @@ Use a separate `[academic_providers]` group with per-provider `enabled`, `max_co
 
 - [ ] **Step 1: Write failing built-in registration tests**
   - Discovery order exactly `arxiv`, `semantic_scholar`, `openalex`, `dblp`, `crossref`, `core`.
-  - Authentication modes: arXiv none, Semantic Scholar optional, OpenAlex none, dblp none, Crossref none, CORE optional.
+  - Authentication modes: arXiv none, Semantic Scholar optional, OpenAlex none, dblp none, Crossref none, CORE required.
   - Optional contact identity for OpenAlex/Crossref; required contact for separately registered Unpaywall resolver.
   - Only intended options (v1: `api_url`) are accepted; resolver never appears in discovery iteration.
 

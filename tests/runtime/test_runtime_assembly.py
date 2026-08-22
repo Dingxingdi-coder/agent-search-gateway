@@ -282,7 +282,11 @@ async def test_runtime_assembles_all_academic_providers_resolver_and_closes_once
         "openalex": {"enabled": True},
         "dblp": {"enabled": True},
         "crossref": {"enabled": True},
-        "core": {"enabled": True, "max_concurrency": 4},
+        "core": {
+            "enabled": True,
+            "api_key_env": "CORE_API_KEY",
+            "max_concurrency": 4,
+        },
     }
     raw["oa_resolvers"] = {
         "unpaywall": {"enabled": True, "contact_email_env": "OA_CONTACT"}
@@ -294,6 +298,7 @@ async def test_runtime_assembles_all_academic_providers_resolver_and_closes_once
         "ENV_D": "x",
         "ENV_E": "x",
         "ENV_F": "x",
+        "CORE_API_KEY": "x",
         "OA_CONTACT": "[REDACTED_SECRET]",
     }
     resolved = resolve_config(

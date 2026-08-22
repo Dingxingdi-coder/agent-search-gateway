@@ -40,7 +40,7 @@ def build_default_academic_registry() -> AcademicProviderRegistry:
             "crossref", CrossrefProvider, _ALLOWED_OPTIONS, "none", "optional"
         ),
         AcademicProviderRegistration(
-            "core", CoreProvider, _ALLOWED_OPTIONS, "optional", "none"
+            "core", CoreProvider, _ALLOWED_OPTIONS, "required", "none"
         ),
     )
     for registration in registrations:

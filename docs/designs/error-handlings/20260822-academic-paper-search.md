@@ -224,13 +224,13 @@ These outcomes do not generate command failures.
 
 ### 7.2 Resolver Execution Failures
 
-Timeout, terminal 429/5xx, invalid JSON, or otherwise malformed Unpaywall protocol data are resolver failures. They are logged as enrichment failures and the pre-enrichment `PaperRecord` is retained.
+Timeout, terminal 429/5xx, invalid JSON, otherwise malformed Unpaywall protocol data, or another resolver execution exception are resolver failures. They are logged as enrichment failures and the pre-enrichment `PaperRecord` is retained. Task cancellation still propagates.
 
 ```text
 event=paper_enrichment_failed
 resolver=unpaywall
 stage=oa_resolve
-error_type=ExecutionFailure|ProtocolFailure
+error_type=<exception type>
 ```
 
 Do not expose a successful paper-search command as failed solely because OA resolution failed.

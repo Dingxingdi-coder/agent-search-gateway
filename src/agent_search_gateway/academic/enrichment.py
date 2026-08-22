@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import replace
 
-from ..errors import GatewayError
 from ..models import OAResolution, PaperRecord
 from ..observability import log_event
 from ..providers.contracts import OAResolver
@@ -31,7 +31,9 @@ async def enrich_paper_records(
         if doi not in cache:
             try:
                 cache[doi] = await resolver.resolve(doi)
-            except GatewayError as exc:
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
                 log_event(
                     _LOGGER,
                     logging.DEBUG,

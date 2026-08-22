@@ -27,8 +27,8 @@ class CoreProvider:
         self,
         executor: AcademicHttpExecutor,
         *,
+        api_key: SecretValue,
         api_url: str = _DEFAULT_API_URL,
-        api_key: SecretValue | None = None,
     ) -> None:
         self._executor = executor
         self._api_url = api_url
@@ -55,9 +55,7 @@ class CoreProvider:
                 hits.append(mapped)
         return hits
 
-    def _request_headers(self) -> dict[str, str] | None:
-        if self._credential is None:
-            return None
+    def _request_headers(self) -> dict[str, str]:
         reveal = self._credential.reveal
         return {"Authorization": f"Bearer {reveal()}"}
 

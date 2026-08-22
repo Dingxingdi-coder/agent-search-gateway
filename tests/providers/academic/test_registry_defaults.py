@@ -35,7 +35,7 @@ def test_default_academic_registry_has_exact_order_factories_and_requirements() 
         ("none", "optional"),
         ("none", "none"),
         ("none", "optional"),
-        ("optional", "none"),
+        ("required", "none"),
     ]
     assert all(item.allowed_config_keys == frozenset({"api_url"}) for item in registrations)
 

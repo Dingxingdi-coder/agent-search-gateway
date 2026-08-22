@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from urllib.parse import quote
 
 from ...academic.normalization import normalize_doi
 from ...errors import InputFailure
@@ -38,10 +39,11 @@ class UnpaywallResolver:
                 stage="oa_resolve",
             )
         reveal = self._contact.reveal
+        encoded_doi = quote(canonical_doi, safe="")
         try:
             payload = await self._executor.request_json(
                 "GET",
-                join_url(self._api_url, canonical_doi),
+                join_url(self._api_url, encoded_doi),
                 stage="oa_resolve",
                 params={"email": reveal()},
             )

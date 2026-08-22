@@ -22,7 +22,11 @@ async def test_runtime_instantiates_only_enabled_academic_providers_in_configure
     raw = _config()
     raw["academic_providers"] = {
         "default_max_concurrency": 2,
-        "core": {"enabled": True, "max_concurrency": 4},
+        "core": {
+            "enabled": True,
+            "api_key_env": "CORE_API_KEY",
+            "max_concurrency": 4,
+        },
         "arxiv": {"enabled": False},
         "openalex": {"enabled": True},
     }
@@ -36,6 +40,7 @@ async def test_runtime_instantiates_only_enabled_academic_providers_in_configure
             "ENV_D": "x",
             "ENV_E": "x",
             "ENV_F": "x",
+            "CORE_API_KEY": "x",
         },
         academic_registry=academic_registry,
         oa_resolver_registry=resolver_registry,

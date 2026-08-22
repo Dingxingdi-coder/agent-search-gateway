@@ -1,4 +1,7 @@
+import asyncio
 import logging
+
+import pytest
 
 from agent_search_gateway.academic.aggregator import PaperAggregator
 from agent_search_gateway.academic.enrichment import enrich_paper_records
@@ -14,7 +17,7 @@ class RecordingResolver:
     def __init__(
         self,
         response: OAResolution | None = None,
-        failure: Exception | None = None,
+        failure: BaseException | None = None,
     ) -> None:
         self.response = response
         self.failure = failure
@@ -122,3 +125,19 @@ async def test_enrichment_failure_logs_safe_event_and_retains_record(caplog: obj
         [getattr(record, "gateway_fields", {}) for record in caplog.records]  # type: ignore[attr-defined]
     )
     assert "10.1000/example" not in rendered_fields
+
+
+async def test_enrichment_unexpected_resolver_failure_retains_record(caplog: object) -> None:
+    resolver = RecordingResolver(failure=RuntimeError("unexpected resolver failure"))
+    original = _record()
+    with caplog.at_level(logging.DEBUG):  # type: ignore[attr-defined]
+        enriched = await enrich_paper_records([original], resolver)
+    assert enriched == [original]
+    events = [getattr(record, "gateway_event", "") for record in caplog.records]  # type: ignore[attr-defined]
+    assert "paper_enrichment_failed" in events
+
+
+async def test_enrichment_preserves_cancellation() -> None:
+    resolver = RecordingResolver(failure=asyncio.CancelledError())
+    with pytest.raises(asyncio.CancelledError):
+        await enrich_paper_records([_record()], resolver)

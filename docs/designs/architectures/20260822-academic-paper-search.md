@@ -171,7 +171,7 @@ Academic search is added as a parallel domain beside the existing URL-centric we
 ##### Provider-Specific Credential Requirements Without Shared Fake Requirements
 
 - Description: Academic config supports no-key providers, optional API keys, API-key providers, and contact-email configuration as required by each adapter. Provider registrations declare allowed options and whether credentials/contact identity are optional or required.
-- Rationale: arXiv/dblp do not require API keys; Semantic Scholar may use one; CORE may use one; Crossref/OpenAlex benefit from contact identity; Unpaywall resolution requires contact email. Forcing all through `api_key_env` would distort real API contracts.
+- Rationale: arXiv/dblp do not require API keys; Semantic Scholar may use one; CORE requires one; Crossref/OpenAlex benefit from contact identity; Unpaywall resolution requires contact email. Forcing all providers through one credential rule would distort real API contracts.
 - Trade-offs: Academic config validation is slightly richer than the current web config resolver.
 
 ##### Reuse Existing HTTP Execution Semantics

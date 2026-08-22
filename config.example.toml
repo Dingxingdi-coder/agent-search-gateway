@@ -93,8 +93,7 @@ api_url = "https://api.crossref.org"
 [academic_providers.core]
 enabled = true
 api_url = "https://api.core.ac.uk/v3"
-# Optional:
-# api_key_env = "CORE_API_KEY"
+api_key_env = "CORE_API_KEY"
 
 [oa_resolvers.unpaywall]
 enabled = false

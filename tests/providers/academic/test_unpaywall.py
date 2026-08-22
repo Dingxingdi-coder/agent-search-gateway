@@ -31,7 +31,21 @@ async def test_unpaywall_maps_best_pdf_and_contact_param() -> None:
     assert resolved.oa_status == "gold"
     assert resolved.license == "cc-by"
     request = executor.requests[0]
-    assert request.url == "https://api.unpaywall.org/v2/10.1000/unpaywall.example"
+    assert request.url == "https://api.unpaywall.org/v2/10.1000%2Funpaywall.example"
+    assert request.params == {"email": "[REDACTED_SECRET]"}
+
+
+async def test_unpaywall_percent_encodes_reserved_doi_path_characters() -> None:
+    executor = RecordingJsonExecutor([_fixture("non_oa.json")])
+    resolver = UnpaywallResolver(
+        executor,
+        contact_email=SecretValue("[REDACTED_SECRET]"),
+    )
+
+    await resolver.resolve("10.1000/example#part?query")
+
+    request = executor.requests[0]
+    assert request.url == "https://api.unpaywall.org/v2/10.1000%2Fexample%23part%3Fquery"
     assert request.params == {"email": "[REDACTED_SECRET]"}
 
 

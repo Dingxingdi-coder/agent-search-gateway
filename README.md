@@ -142,13 +142,14 @@ api_url = "https://api.crossref.org"
 [academic_providers.core]
 enabled = true
 api_url = "https://api.core.ac.uk/v3"
+api_key_env = "CORE_API_KEY"
 
 [oa_resolvers.unpaywall]
 enabled = false
 api_url = "https://api.unpaywall.org/v2"
 ```
 
-arXiv and dblp require no credentials. Semantic Scholar and CORE may set `api_key_env`; omitting it selects their unauthenticated mode and there is no authentication fallback after a configured credential is rejected. OpenAlex and Crossref may set `contact_email_env`. Unpaywall is disabled by default; enabling it requires `contact_email_env`, and the named environment variable must exist. Configuration values reference environment-variable names rather than embedding API keys or contact values in TOML.
+arXiv and dblp require no credentials. Semantic Scholar may set `api_key_env`; omitting it selects unauthenticated mode and there is no authentication fallback after a configured credential is rejected. CORE requires `api_key_env`, and the named environment variable must exist. OpenAlex and Crossref may set `contact_email_env`. Unpaywall is disabled by default; enabling it requires `contact_email_env`, and the named environment variable must exist. Configuration values reference environment-variable names rather than embedding API keys or contact values in TOML.
 
 `paper-search` writes `paper-<request-id>.jsonl`. Each row uses the paper schema directly and has no `type` discriminator. Fields are `title`, `authors`, `abstract`, `identifiers`, `published_date`, `updated_date`, `url`, `pdf_url`, `venue`, `topics`, `citation_counts`, `is_open_access`, `oa_status`, `license`, and `sources`. `identifiers` contains `doi`, `arxiv_id`, `semantic_scholar_id`, `openalex_id`, `dblp_key`, and `core_id`.
 
