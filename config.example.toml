@@ -61,6 +61,47 @@ max_age_seconds = 600
 timeout_seconds = 30
 disable_cache_fallback = true
 
+[academic_providers]
+default_max_concurrency = 3
+
+[academic_providers.arxiv]
+enabled = true
+api_url = "https://export.arxiv.org/api/query"
+
+[academic_providers.semantic_scholar]
+enabled = true
+api_url = "https://api.semanticscholar.org/graph/v1"
+# Optional:
+# api_key_env = "SEMANTIC_SCHOLAR_API_KEY"
+
+[academic_providers.openalex]
+enabled = true
+api_url = "https://api.openalex.org"
+# Optional:
+# contact_email_env = "OPENALEX_CONTACT_EMAIL"
+
+[academic_providers.dblp]
+enabled = true
+api_url = "https://dblp.org/search/publ/api"
+
+[academic_providers.crossref]
+enabled = true
+api_url = "https://api.crossref.org"
+# Optional:
+# contact_email_env = "CROSSREF_CONTACT_EMAIL"
+
+[academic_providers.core]
+enabled = true
+api_url = "https://api.core.ac.uk/v3"
+# Optional:
+# api_key_env = "CORE_API_KEY"
+
+[oa_resolvers.unpaywall]
+enabled = false
+api_url = "https://api.unpaywall.org/v2"
+# Required when enabled = true:
+# contact_email_env = "UNPAYWALL_CONTACT_EMAIL"
+
 [llm_providers]
 default_max_concurrency = 2
 

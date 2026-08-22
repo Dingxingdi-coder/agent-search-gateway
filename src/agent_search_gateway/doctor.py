@@ -13,6 +13,10 @@ from .config import load_toml, resolve_config
 from .errors import ConfigFailure
 from .observability import normalize_log_reason
 from .paths import RuntimePaths
+from .providers.academic.defaults import (
+    build_default_academic_registry,
+    build_default_oa_resolver_registry,
+)
 from .providers.defaults import build_default_registry
 from .socket_probe import SocketProbeResult, SocketState, probe_unix_socket
 
@@ -115,7 +119,13 @@ def _configuration_checks(
     except ConfigFailure as exc:
         return (DoctorCheck(DoctorStatus.FAIL, f"config parse failed: {exc.message}"),)
     try:
-        config = resolve_config(data, build_default_registry(), environ)
+        config = resolve_config(
+            data,
+            build_default_registry(),
+            environ,
+            academic_registry=build_default_academic_registry(),
+            oa_resolver_registry=build_default_oa_resolver_registry(),
+        )
     except ConfigFailure as exc:
         return (DoctorCheck(DoctorStatus.FAIL, f"configuration invalid: {exc.message}"),)
 
@@ -126,6 +136,16 @@ def _configuration_checks(
         if provider.api_key_env is not None
     }
     env_names.update(provider.api_key_env for provider in config.llm.providers)
+    for provider in config.academic.providers:
+        if provider.api_key_env is not None:
+            env_names.add(provider.api_key_env)
+        if provider.contact_email_env is not None:
+            env_names.add(provider.contact_email_env)
+    if config.oa_resolver is not None:
+        if config.oa_resolver.api_key_env is not None:
+            env_names.add(config.oa_resolver.api_key_env)
+        if config.oa_resolver.contact_email_env is not None:
+            env_names.add(config.oa_resolver.contact_email_env)
     checks.extend(
         DoctorCheck(DoctorStatus.OK, f"environment variable {name} is set")
         for name in sorted(env_names)

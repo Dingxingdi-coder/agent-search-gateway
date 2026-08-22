@@ -16,6 +16,7 @@ from .models import (
     ErrorResponse,
     KeywordSearchRequest,
     LLMSearchRequest,
+    PaperSearchRequest,
     Request,
     Response,
     ShutdownRequest,
@@ -54,8 +55,12 @@ def build_parser() -> argparse.ArgumentParser:
     keyword = subparsers.add_parser("keyword-search")
     keyword.add_argument("query")
 
+    paper = subparsers.add_parser("paper-search")
+    paper.add_argument("query")
+
     llm = subparsers.add_parser("llm-search")
     llm.add_argument("prompt")
+    llm.add_argument("--scope", choices=("web", "paper", "all"), default="web")
 
     fetch = subparsers.add_parser("url-fetch")
     fetch.add_argument("url")
@@ -71,11 +76,16 @@ def _request_from_args(args: argparse.Namespace) -> Request:
         if not query:
             raise InputFailure(ErrorCode.EMPTY_QUERY, "Query must not be empty")
         return KeywordSearchRequest(query)
+    if args.command == "paper-search":
+        query = args.query.strip()
+        if not query:
+            raise InputFailure(ErrorCode.EMPTY_QUERY, "Query must not be empty")
+        return PaperSearchRequest(query)
     if args.command == "llm-search":
         prompt = args.prompt.strip()
         if not prompt:
             raise InputFailure(ErrorCode.EMPTY_QUERY, "Prompt must not be empty")
-        return LLMSearchRequest(prompt)
+        return LLMSearchRequest(prompt, args.scope)
     if args.command == "url-fetch":
         url = normalize_url(args.url)
         focus = args.focus.strip() if args.focus is not None and args.focus.strip() else None

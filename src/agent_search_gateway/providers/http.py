@@ -1,9 +1,10 @@
-"""Shared HTTP JSON execution boundary for provider adapters."""
+"""Shared HTTP execution boundary for provider adapters."""
 
 import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping
+from typing import Any
 
 import httpx
 
@@ -19,7 +20,20 @@ class _RetryableStatus(Exception):
         self.status_code = status_code
 
 
+class HttpStatusFailure(ExecutionFailure):
+    """Internal HTTP failure with a machine-readable terminal status code."""
+
+    def __init__(self, provider_name: str, stage: str, status_code: int) -> None:
+        super().__init__(
+            ErrorCode.ALL_PROVIDERS_FAILED,
+            f"{provider_name}/{stage}: HTTP status {status_code}",
+        )
+        self.status_code = status_code
+
+
 class HttpJsonExecutor:
+    """Execute JSON or text HTTP requests with one retry and logging policy."""
+
     def __init__(
         self,
         client: httpx.AsyncClient,
@@ -44,8 +58,63 @@ class HttpJsonExecutor:
         *,
         stage: str,
         headers: Mapping[str, str] | None = None,
+        params: Mapping[str, Any] | None = None,
         json_body: object | None = None,
     ) -> object:
+        response = await self._request_response(
+            method,
+            url,
+            stage=stage,
+            headers=headers,
+            params=params,
+            json_body=json_body,
+        )
+        try:
+            return response.json()
+        except ValueError as exc:
+            self._log_failed(
+                stage,
+                http_endpoint_for_log(url),
+                1,
+                self._monotonic(),
+                "decode",
+                elapsed_override=0,
+            )
+            raise ProtocolFailure(
+                ErrorCode.PROTOCOL_ERROR,
+                f"{self._provider_name}/{stage}: response was not valid JSON",
+            ) from exc
+
+    async def request_text(
+        self,
+        method: str,
+        url: str,
+        *,
+        stage: str,
+        headers: Mapping[str, str] | None = None,
+        params: Mapping[str, Any] | None = None,
+        json_body: object | None = None,
+    ) -> str:
+        response = await self._request_response(
+            method,
+            url,
+            stage=stage,
+            headers=headers,
+            params=params,
+            json_body=json_body,
+        )
+        return response.text
+
+    async def _request_response(
+        self,
+        method: str,
+        url: str,
+        *,
+        stage: str,
+        headers: Mapping[str, str] | None,
+        params: Mapping[str, Any] | None,
+        json_body: object | None,
+    ) -> httpx.Response:
         attempt = 0
         attempt_started = self._monotonic()
         log_endpoint = http_endpoint_for_log(url)
@@ -100,6 +169,7 @@ class HttpJsonExecutor:
                 method,
                 url,
                 headers=headers,
+                params=params,
                 json=json_body,
                 timeout=self._retry_policy.request_timeout_seconds,
             )
@@ -136,7 +206,7 @@ class HttpJsonExecutor:
                 "status",
                 status=exc.status_code,
             )
-            raise self._execution_failure(stage, f"HTTP status {exc.status_code}") from exc
+            raise self._status_failure(stage, exc.status_code) from exc
         except (httpx.TimeoutException, httpx.TransportError) as exc:
             self._log_failed(stage, log_endpoint, attempt, attempt_started, "transport")
             raise self._execution_failure(stage, "HTTP transport failure") from exc
@@ -150,16 +220,8 @@ class HttpJsonExecutor:
                 "status",
                 status=response.status_code,
             )
-            raise self._execution_failure(stage, f"HTTP status {response.status_code}")
-
-        try:
-            return response.json()
-        except ValueError as exc:
-            self._log_failed(stage, log_endpoint, attempt, attempt_started, "decode")
-            raise ProtocolFailure(
-                ErrorCode.PROTOCOL_ERROR,
-                f"{self._provider_name}/{stage}: response was not valid JSON",
-            ) from exc
+            raise self._status_failure(stage, response.status_code)
+        return response
 
     def _log_failed(
         self,
@@ -170,8 +232,13 @@ class HttpJsonExecutor:
         category: str,
         *,
         status: int | None = None,
+        elapsed_override: int | None = None,
     ) -> None:
-        attempt_elapsed_ms = elapsed_ms(self._monotonic, started)
+        attempt_elapsed_ms = (
+            elapsed_override
+            if elapsed_override is not None
+            else elapsed_ms(self._monotonic, started)
+        )
         if status is None:
             log_event(
                 self._logger,
@@ -194,8 +261,8 @@ class HttpJsonExecutor:
             endpoint=endpoint,
             attempt=attempt,
             category=category,
-            status=status,
             elapsed_ms=attempt_elapsed_ms,
+            status=status,
         )
 
     async def aclose(self) -> None:
@@ -207,6 +274,9 @@ class HttpJsonExecutor:
             exc,
             _RetryableStatus | httpx.TimeoutException | httpx.TransportError,
         )
+
+    def _status_failure(self, stage: str, status_code: int) -> HttpStatusFailure:
+        return HttpStatusFailure(self._provider_name, stage, status_code)
 
     def _execution_failure(self, stage: str, reason: str) -> ExecutionFailure:
         return ExecutionFailure(

@@ -12,6 +12,7 @@ from agent_search_gateway.models import (
     ErrorResponse,
     KeywordSearchRequest,
     LLMSearchRequest,
+    PaperSearchRequest,
     Request,
     Response,
     ShutdownRequest,
@@ -37,7 +38,9 @@ async def test_cli_renders_exact_stdout_stderr_and_exit_codes(tmp_path: Path) ->
         ["stop"],
         ["doctor"],
         ["keyword-search", "query"],
+        ["paper-search", "query"],
         ["llm-search", "prompt"],
+        ["llm-search", "prompt", "--scope", "paper"],
         ["url-fetch", "https://example.com"],
         ["url-fetch", "https://example.com", "focus"],
     ):
@@ -81,6 +84,11 @@ async def test_cli_renders_exact_stdout_stderr_and_exit_codes(tmp_path: Path) ->
         "",
         "Query must not be empty\n",
     )
+    assert await invoke(["paper-search", "   "]) == (
+        1,
+        "",
+        "Query must not be empty\n",
+    )
     assert await invoke(["llm-search", "\t "]) == (
         1,
         "",
@@ -112,11 +120,32 @@ async def test_cli_renders_exact_stdout_stderr_and_exit_codes(tmp_path: Path) ->
     assert isinstance(keyword_request, KeywordSearchRequest)
     assert keyword_request.query == "query"
 
+    response = SuccessResponse("/tmp/papers.jsonl")
+    assert await invoke(["paper-search", "  papers  "]) == (
+        0,
+        "/tmp/papers.jsonl\n",
+        "",
+    )
+    paper_request = calls[-1]
+    assert isinstance(paper_request, PaperSearchRequest)
+    assert paper_request.query == "papers"
+
     response = SuccessResponse("llm result")
     assert await invoke(["llm-search", "  prompt  "]) == (0, "llm result\n", "")
     llm_request = calls[-1]
     assert isinstance(llm_request, LLMSearchRequest)
     assert llm_request.prompt == "prompt"
+    assert llm_request.scope == "web"
+
+    response = SuccessResponse("paper llm result")
+    assert await invoke(["llm-search", "prompt", "--scope", "paper"]) == (
+        0,
+        "paper llm result\n",
+        "",
+    )
+    scoped_request = calls[-1]
+    assert isinstance(scoped_request, LLMSearchRequest)
+    assert scoped_request == LLMSearchRequest("prompt", "paper")
 
     response = SuccessResponse("content")
     assert await invoke(["url-fetch", " https://EXAMPLE.com/a ", "   "]) == (

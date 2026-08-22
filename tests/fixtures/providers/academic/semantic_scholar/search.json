@@ -1,0 +1,29 @@
+{
+  "data": [
+    {
+      "paperId": "649DEF34F8BE52C8B66281AF98AE884C09AEF38B",
+      "title": "Attention Is All You Need",
+      "abstract": "Transformer abstract.",
+      "citationCount": 12345,
+      "authors": [{"name": "Ashish Vaswani"}, {"name": "Noam Shazeer"}],
+      "url": "https://www.semanticscholar.org/paper/649DEF34F8BE52C8B66281AF98AE884C09AEF38B",
+      "publicationDate": "2017-06-12",
+      "externalIds": {"DOI": "10.5555/3295222.3295349", "ArXiv": "1706.03762v5"},
+      "fieldsOfStudy": ["Computer Science", "Mathematics"],
+      "openAccessPdf": {"url": "https://example.test/attention.pdf"}
+    },
+    {
+      "paperId": "ABCDEF123456",
+      "title": "Minimal Paper",
+      "abstract": null,
+      "citationCount": 0,
+      "authors": [],
+      "url": "https://www.semanticscholar.org/paper/ABCDEF123456",
+      "publicationDate": null,
+      "externalIds": {},
+      "fieldsOfStudy": null,
+      "openAccessPdf": null
+    },
+    {"title": "Malformed without identity"}
+  ]
+}

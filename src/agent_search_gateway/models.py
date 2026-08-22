@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import date
 from typing import TYPE_CHECKING, Literal, TypeAlias
 
 from .errors import ErrorCode, ExecutionFailure
@@ -26,6 +27,44 @@ class URLRecord:
 class SearchRecord:
     url: NormalizedURL
     abstract: str
+
+
+@dataclass(frozen=True, slots=True)
+class PaperIdentifiers:
+    doi: str = ""
+    arxiv_id: str = ""
+    semantic_scholar_id: str = ""
+    openalex_id: str = ""
+    dblp_key: str = ""
+    core_id: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class PaperRecord:
+    title: str
+    authors: tuple[str, ...]
+    abstract: str
+    identifiers: PaperIdentifiers
+    published_date: date | None
+    updated_date: date | None
+    url: NormalizedURL
+    pdf_url: NormalizedURL | None
+    venue: str
+    topics: tuple[str, ...]
+    citation_counts: Mapping[str, int]
+    is_open_access: bool | None
+    oa_status: str
+    license: str
+    sources: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class OAResolution:
+    landing_url: NormalizedURL | None
+    pdf_url: NormalizedURL | None
+    is_open_access: bool
+    oa_status: str = ""
+    license: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,8 +94,17 @@ class KeywordSearchRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class PaperSearchRequest:
+    query: str
+
+
+LLMSearchScope = Literal["web", "paper", "all"]
+
+
+@dataclass(frozen=True, slots=True)
 class LLMSearchRequest:
     prompt: str
+    scope: LLMSearchScope = "web"
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +118,9 @@ class ShutdownRequest:
     pass
 
 
-Request: TypeAlias = KeywordSearchRequest | LLMSearchRequest | URLFetchRequest | ShutdownRequest
+Request: TypeAlias = (
+    KeywordSearchRequest | PaperSearchRequest | LLMSearchRequest | URLFetchRequest | ShutdownRequest
+)
 
 
 @dataclass(frozen=True, slots=True)

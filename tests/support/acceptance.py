@@ -2,21 +2,31 @@
 
 from collections.abc import Mapping, Sequence
 
+from agent_search_gateway.academic.aggregator import PaperAggregator
 from agent_search_gateway.concurrency import ProviderQuotaManager
+from agent_search_gateway.errors import ErrorCode, ExecutionFailure
 from agent_search_gateway.llm.stages import LLMStages
-from agent_search_gateway.models import LLMInvocation
+from agent_search_gateway.models import LLMInvocation, OAResolution
 from agent_search_gateway.orchestrators.fetch import FetchOrchestrator
+from agent_search_gateway.orchestrators.paper import PaperSearchOrchestrator
 from agent_search_gateway.orchestrators.search import SearchOrchestrator
 from agent_search_gateway.paths import RuntimePaths
 from agent_search_gateway.providers.contracts import (
     ChatMessage,
     KeywordSearchHit,
+    PaperSearchHit,
     URLFetchCandidate,
 )
 from agent_search_gateway.result_writer import ResultWriter
 from agent_search_gateway.scheduler.fetch import FetchScheduler
+from agent_search_gateway.url_normalization import normalize_url
 from agent_search_gateway.url_store import URLStore
-from tests.support.fakes import FakeKeywordSearchProvider, FakeURLFetchProvider
+from tests.support.fakes import (
+    FakeAcademicSearchProvider,
+    FakeKeywordSearchProvider,
+    FakeOAResolver,
+    FakeURLFetchProvider,
+)
 
 
 class _AcceptanceLLMClient:
@@ -35,6 +45,25 @@ class _AcceptanceLLMClient:
         messages: Sequence[ChatMessage],
     ) -> str:
         if invocation.model == "search-model":
+            if "## Paper" in messages[0]["content"]:
+                return (
+                    "## Paper\n"
+                    "Title: LLM Academic Paper\n"
+                    "Authors: L. Author\n"
+                    "Abstract: LLM paper abstract\n"
+                    "DOI: \n"
+                    "arXiv: \n"
+                    "Published: 2024-01-03\n"
+                    "Updated: \n"
+                    "URL: https://example.com/llm-paper\n"
+                    "PDF: \n"
+                    "Venue: Example Workshop\n"
+                    "Topics: AI\n"
+                    "Citations: 3\n"
+                    "Open Access: unknown\n"
+                    "OA Status: \n"
+                    "License: "
+                )
             return "## Result\nURL: https://example.com/llm\nAbstract: LLM abstract\n"
         if invocation.model == "focus-model":
             prompt = messages[-1]["content"]
@@ -68,9 +97,60 @@ class AcceptanceRuntime:
                 content="Full article content",
             ),
         )
+        shared_doi = "10.1000/acceptance-shared"
+        openalex = FakeAcademicSearchProvider(
+            "openalex",
+            [
+                PaperSearchHit(
+                    source="openalex",
+                    source_id="W111",
+                    title="Direct Academic Paper",
+                    authors=("A. Author",),
+                    abstract="Direct academic abstract",
+                    doi=shared_doi,
+                    url="https://example.com/paper",
+                )
+            ],
+        )
+        failed_crossref = FakeAcademicSearchProvider(
+            "crossref",
+            failure=ExecutionFailure(ErrorCode.ALL_PROVIDERS_FAILED, "acceptance failure"),
+        )
+        core = FakeAcademicSearchProvider(
+            "core",
+            [
+                PaperSearchHit(
+                    source="core",
+                    source_id="core-shared",
+                    title="Duplicate metadata",
+                    authors=("A. Author",),
+                    doi=shared_doi,
+                    url="https://example.com/core-copy",
+                ),
+                PaperSearchHit(
+                    source="core",
+                    source_id="core-unique",
+                    title="Unique CORE Paper",
+                    authors=("C. Author",),
+                    abstract="Unique repository abstract",
+                    url="https://example.com/core-unique",
+                ),
+            ],
+        )
+        self.academic_providers = (openalex, failed_crossref, core)
+        self.oa_resolver = FakeOAResolver(
+            OAResolution(
+                landing_url=normalize_url("https://repository.example/paper"),
+                pdf_url=normalize_url("https://repository.example/paper.pdf"),
+                is_open_access=True,
+                oa_status="green",
+                license="cc-by",
+            )
+        )
         quotas = ProviderQuotaManager(
             web_limits={"keyword": 2, "fetch": 2},
             llm_limits={},
+            academic_limits={"openalex": 2, "crossref": 2, "core": 2},
         )
         client = _AcceptanceLLMClient()
         judge = LLMInvocation("llm", "judge-model", {})
@@ -85,13 +165,25 @@ class AcceptanceRuntime:
             content_clean=clean,
             focus_summary=focus,
         )
+        result_writer = ResultWriter(paths.results_dir)
+        paper_aggregator = PaperAggregator(("openalex", "crossref", "core", "llm:llm"))
         self.search_orchestrator = SearchOrchestrator(
             keyword_providers=[keyword_provider],
             llm_invocations=[search],
             quotas=quotas,
             stages=stages,
             store=store,
-            result_writer=ResultWriter(paths.results_dir),
+            result_writer=result_writer,
+            paper_aggregator=paper_aggregator,
+            paper_resolver=self.oa_resolver,
+        )
+        self.paper_search_orchestrator = PaperSearchOrchestrator(
+            providers=self.academic_providers,
+            quotas=quotas,
+            aggregator=paper_aggregator,
+            resolver=self.oa_resolver,
+            store=store,
+            result_writer=result_writer,
         )
         self.fetch_orchestrator = FetchOrchestrator(
             store=store,
@@ -168,13 +260,22 @@ class DebugAcceptanceRuntime:
             content_clean=invocation,
             focus_summary=invocation,
         )
+        result_writer = ResultWriter(paths.results_dir)
         self.search_orchestrator = SearchOrchestrator(
             keyword_providers=[self.keyword_provider],
             llm_invocations=(),
             quotas=quotas,
             stages=stages,
             store=store,
-            result_writer=ResultWriter(paths.results_dir),
+            result_writer=result_writer,
+        )
+        self.paper_search_orchestrator = PaperSearchOrchestrator(
+            providers=(),
+            quotas=quotas,
+            aggregator=PaperAggregator(()),
+            resolver=None,
+            store=store,
+            result_writer=result_writer,
         )
         self.fetch_orchestrator = FetchOrchestrator(
             store=store,

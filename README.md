@@ -90,11 +90,73 @@ Run keyword search:
 agent-search-gateway keyword-search "query text"
 ```
 
-Run LLM-assisted search:
+Run direct academic paper search:
+
+```bash
+agent-search-gateway paper-search "research topic"
+```
+
+Run LLM-assisted search. The default scope remains `web`, preserving the pre-academic-search output contract:
 
 ```bash
 agent-search-gateway llm-search "research prompt"
 ```
+
+Use the paper-only LLM grammar or run web and paper branches concurrently:
+
+```bash
+agent-search-gateway llm-search "research prompt" --scope paper
+agent-search-gateway llm-search "research prompt" --scope all
+```
+
+## Academic paper search
+
+Direct paper discovery queries enabled academic providers concurrently and merges records by DOI, arXiv id, provider-native id, then a conservative bibliographic fallback. The built-in discovery order is arXiv, Semantic Scholar, OpenAlex, dblp, Crossref, then CORE. Unpaywall is not a discovery provider; it runs after deduplication and only for DOI-bearing papers.
+
+Academic providers use a separate configuration namespace and concurrency budget:
+
+```toml
+[academic_providers]
+default_max_concurrency = 3
+
+[academic_providers.arxiv]
+enabled = true
+api_url = "https://export.arxiv.org/api/query"
+
+[academic_providers.semantic_scholar]
+enabled = true
+api_url = "https://api.semanticscholar.org/graph/v1"
+
+[academic_providers.openalex]
+enabled = true
+api_url = "https://api.openalex.org"
+
+[academic_providers.dblp]
+enabled = true
+api_url = "https://dblp.org/search/publ/api"
+
+[academic_providers.crossref]
+enabled = true
+api_url = "https://api.crossref.org"
+
+[academic_providers.core]
+enabled = true
+api_url = "https://api.core.ac.uk/v3"
+
+[oa_resolvers.unpaywall]
+enabled = false
+api_url = "https://api.unpaywall.org/v2"
+```
+
+arXiv and dblp require no credentials. Semantic Scholar and CORE may set `api_key_env`; omitting it selects their unauthenticated mode and there is no authentication fallback after a configured credential is rejected. OpenAlex and Crossref may set `contact_email_env`. Unpaywall is disabled by default; enabling it requires `contact_email_env`, and the named environment variable must exist. Configuration values reference environment-variable names rather than embedding API keys or contact values in TOML.
+
+`paper-search` writes `paper-<request-id>.jsonl`. Each row uses the paper schema directly and has no `type` discriminator. Fields are `title`, `authors`, `abstract`, `identifiers`, `published_date`, `updated_date`, `url`, `pdf_url`, `venue`, `topics`, `citation_counts`, `is_open_access`, `oa_status`, `license`, and `sources`. `identifiers` contains `doi`, `arxiv_id`, `semantic_scholar_id`, `openalex_id`, `dblp_key`, and `core_id`.
+
+`llm-search --scope paper` writes the same paper rows to `llm-<request-id>.jsonl`. `llm-search --scope all` uses the mixed sink: web rows are emitted first with `"type":"web"`, followed by paper rows with `"type":"paper"`. The `type` field is added only by the mixed writer. Plain `llm-search` remains the legacy web-only path and its JSONL bytes are unchanged.
+
+Paper landing URLs are admitted to the shared URL store using the academic abstract, or the title when no abstract exists, so a later `url-fetch` may retrieve them. Paper PDF URLs are output metadata only and are not admitted automatically. Unpaywall enrichment never replaces a stronger direct PDF and resolver failures do not discard an already discovered paper.
+
+Search commands create result files only after a successful branch has completed and all rows validate. Input/configuration errors, no-provider failures, and all-provider/all-branch failures do not create result files. A successful empty search may create an empty JSONL file.
 
 Fetch a URL that has already been admitted by a successful search. The final positional focus is optional:
 

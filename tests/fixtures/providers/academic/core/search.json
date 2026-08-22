@@ -1,0 +1,31 @@
+{
+  "results": [
+    {
+      "id": 123456,
+      "title": "CORE Example",
+      "authors": [{"name": "Alice Example"}, {"name": "Bob Example"}],
+      "abstract": "Repository abstract.",
+      "doi": "10.1000/CORE.EXAMPLE",
+      "publishedDate": "2022-05-06T00:00:00",
+      "downloadUrl": "https://core.ac.uk/download/pdf/123456.pdf",
+      "fullTextUrls": ["https://repository.example/fulltext"],
+      "subjects": ["Machine Learning"],
+      "tags": ["Open Access"],
+      "repository": {"name": "Example Repository"},
+      "citationCount": 8
+    },
+    {
+      "id": "core-2",
+      "title": "Full Text Fallback",
+      "authors": ["String Author"],
+      "publishedDate": null,
+      "downloadUrl": null,
+      "fullTextUrls": ["https://repository.example/fallback.pdf"],
+      "subjects": [],
+      "tags": [],
+      "repository": null,
+      "citationCount": 0
+    },
+    {"id": "missing-title"}
+  ]
+}

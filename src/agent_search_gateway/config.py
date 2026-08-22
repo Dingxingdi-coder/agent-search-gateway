@@ -4,16 +4,28 @@ import copy
 import math
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
+from urllib.parse import urlsplit
 
 from .errors import ConfigFailure, ErrorCode
 from .models import LLMInvocation, RetryPolicy
 from .observability import SecretValue
+from .providers.academic.registry import (
+    AcademicProviderRegistration,
+    AcademicProviderRegistry,
+    OAResolverRegistration,
+    OAResolverRegistry,
+    Requirement,
+)
 from .providers.registry import ProviderRegistry, WebProviderRegistration
 
 _WEB_SHARED_KEYS = frozenset({"enable_search", "enable_fetch", "api_key_env", "max_concurrency"})
+_ACADEMIC_SHARED_KEYS = frozenset(
+    {"enabled", "max_concurrency", "api_key_env", "contact_email_env"}
+)
+_ACADEMIC_RESERVED_OPTIONS = frozenset({"executor", "api_key", "contact_email", "name"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +163,223 @@ def resolve_web_provider_config(
 
 
 @dataclass(frozen=True, slots=True)
+class ResolvedAcademicProviderConfig:
+    name: str
+    enabled: bool
+    max_concurrency: int
+    api_key_env: str | None
+    api_key: SecretValue | None
+    contact_email_env: str | None
+    contact_email: SecretValue | None
+    options: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedAcademicProviderGroup:
+    default_max_concurrency: int = 3
+    providers: tuple[ResolvedAcademicProviderConfig, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedOAResolverConfig:
+    name: str
+    api_key_env: str | None
+    api_key: SecretValue | None
+    contact_email_env: str | None
+    contact_email: SecretValue | None
+    options: Mapping[str, object]
+
+
+def _enabled(table: Mapping[str, object], label: str) -> bool:
+    value = table.get("enabled", False)
+    if not isinstance(value, bool):
+        raise _config_error(f"{label}.enabled must be a boolean")
+    return value
+
+
+def _validate_http_url(value: object, label: str) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise _config_error(f"{label} must be a non-empty HTTP(S) URL")
+    try:
+        parsed = urlsplit(value)
+    except ValueError as exc:
+        raise _config_error(f"{label} must be a non-empty HTTP(S) URL") from exc
+    if parsed.scheme not in {"http", "https"} or parsed.hostname is None:
+        raise _config_error(f"{label} must be a non-empty HTTP(S) URL")
+
+
+def _validate_academic_options(
+    name: str,
+    registration: AcademicProviderRegistration | OAResolverRegistration,
+    options: Mapping[str, object],
+) -> None:
+    reserved = set(options) & _ACADEMIC_RESERVED_OPTIONS
+    if reserved:
+        names = ", ".join(sorted(reserved))
+        raise _config_error(f"reserved config key(s) for {name}: {names}")
+    unknown = set(options) - registration.allowed_config_keys
+    if unknown:
+        names = ", ".join(sorted(unknown))
+        raise _config_error(f"unknown config key(s) for {name}: {names}")
+    if "api_url" in options:
+        _validate_http_url(options["api_url"], f"{name}.api_url")
+
+
+def _resolve_environment_value(
+    table: Mapping[str, object],
+    *,
+    key: str,
+    requirement: Requirement,
+    label: str,
+    environ: Mapping[str, str],
+) -> tuple[str | None, SecretValue | None]:
+    if requirement == "none":
+        if key in table:
+            raise _config_error(f"{label} does not accept {key}")
+        return None, None
+    if key not in table:
+        if requirement == "required":
+            raise _config_error(f"{label} requires {key}")
+        return None, None
+    env_name = table[key]
+    if not isinstance(env_name, str) or not env_name.strip():
+        raise _config_error(f"{label}.{key} must be a non-empty string")
+    resolved_value = environ.get(env_name)
+    if not resolved_value:
+        raise _config_error(f"environment variable {env_name} is required")
+    return env_name, SecretValue(resolved_value)
+
+
+def resolve_academic_provider_config(
+    data: Mapping[str, object],
+    registry: AcademicProviderRegistry,
+    environ: Mapping[str, str],
+) -> ResolvedAcademicProviderGroup:
+    group = _require_mapping(data.get("academic_providers", {}), "academic_providers")
+    default_limit = _positive_int(
+        group.get("default_max_concurrency", 3),
+        "academic_providers.default_max_concurrency",
+    )
+    providers: list[ResolvedAcademicProviderConfig] = []
+    for name, raw_value in group.items():
+        if name == "default_max_concurrency":
+            continue
+        table = _require_mapping(raw_value, f"academic_providers.{name}")
+        registration = registry.get(name)
+        if registration is None:
+            raise _config_error(f"unknown academic provider: {name}")
+        enabled = _enabled(table, f"academic_providers.{name}")
+        options = {key: value for key, value in table.items() if key not in _ACADEMIC_SHARED_KEYS}
+        _validate_academic_options(name, registration, options)
+        limit = _positive_int(
+            table.get("max_concurrency", default_limit),
+            f"academic provider {name} max_concurrency",
+        )
+        if not enabled:
+            for key, requirement in (
+                ("api_key_env", registration.authentication),
+                ("contact_email_env", registration.contact),
+            ):
+                if requirement == "none" and key in table:
+                    raise _config_error(f"academic provider {name} does not accept {key}")
+                if key in table and (
+                    not isinstance(table[key], str) or not str(table[key]).strip()
+                ):
+                    raise _config_error(
+                        f"academic provider {name}.{key} must be a non-empty string"
+                    )
+            providers.append(
+                ResolvedAcademicProviderConfig(
+                    name,
+                    False,
+                    limit,
+                    None,
+                    None,
+                    None,
+                    None,
+                    MappingProxyType(dict(options)),
+                )
+            )
+            continue
+        auth_env, auth_value = _resolve_environment_value(
+            table,
+            key="api_key_env",
+            requirement=registration.authentication,
+            label=f"academic provider {name}",
+            environ=environ,
+        )
+        contact_env, contact_value = _resolve_environment_value(
+            table,
+            key="contact_email_env",
+            requirement=registration.contact,
+            label=f"academic provider {name}",
+            environ=environ,
+        )
+        if not enabled:
+            auth_env = None
+            auth_value = None
+            contact_env = None
+            contact_value = None
+        providers.append(
+            ResolvedAcademicProviderConfig(
+                name,
+                enabled,
+                limit,
+                auth_env,
+                auth_value,
+                contact_env,
+                contact_value,
+                MappingProxyType(dict(options)),
+            )
+        )
+    return ResolvedAcademicProviderGroup(default_limit, tuple(providers))
+
+
+def resolve_oa_resolver_config(
+    data: Mapping[str, object],
+    registry: OAResolverRegistry,
+    environ: Mapping[str, str],
+) -> ResolvedOAResolverConfig | None:
+    group = _require_mapping(data.get("oa_resolvers", {}), "oa_resolvers")
+    resolved: ResolvedOAResolverConfig | None = None
+    for name, raw_value in group.items():
+        table = _require_mapping(raw_value, f"oa_resolvers.{name}")
+        registration = registry.get(name)
+        if registration is None:
+            raise _config_error(f"unknown OA resolver: {name}")
+        enabled = _enabled(table, f"oa_resolvers.{name}")
+        options = {key: value for key, value in table.items() if key not in _ACADEMIC_SHARED_KEYS}
+        _validate_academic_options(name, registration, options)
+        if not enabled:
+            continue
+        if resolved is not None:
+            raise _config_error("only one OA resolver may be enabled")
+        auth_env, auth_value = _resolve_environment_value(
+            table,
+            key="api_key_env",
+            requirement=registration.authentication,
+            label=f"OA resolver {name}",
+            environ=environ,
+        )
+        contact_env, contact_value = _resolve_environment_value(
+            table,
+            key="contact_email_env",
+            requirement=registration.contact,
+            label=f"OA resolver {name}",
+            environ=environ,
+        )
+        resolved = ResolvedOAResolverConfig(
+            name,
+            auth_env,
+            auth_value,
+            contact_env,
+            contact_value,
+            MappingProxyType(dict(options)),
+        )
+    return resolved
+
+
+@dataclass(frozen=True, slots=True)
 class LLMProviderConfig:
     name: str
     protocol: str
@@ -177,6 +406,8 @@ class ResolvedConfig:
     web: ResolvedWebProviderGroup
     llm: ResolvedLLMConfig
     retry: RetryPolicy
+    academic: ResolvedAcademicProviderGroup = field(default_factory=ResolvedAcademicProviderGroup)
+    oa_resolver: ResolvedOAResolverConfig | None = None
 
 
 def _required_string(table: Mapping[str, object], key: str, label: str) -> str:
@@ -372,11 +603,26 @@ def resolve_config(
     data: Mapping[str, object],
     registry: ProviderRegistry,
     environ: Mapping[str, str],
+    *,
+    academic_registry: AcademicProviderRegistry | None = None,
+    oa_resolver_registry: OAResolverRegistry | None = None,
 ) -> ResolvedConfig:
+    academic = (
+        resolve_academic_provider_config(data, academic_registry, environ)
+        if academic_registry is not None
+        else ResolvedAcademicProviderGroup()
+    )
+    oa_resolver = (
+        resolve_oa_resolver_config(data, oa_resolver_registry, environ)
+        if oa_resolver_registry is not None
+        else None
+    )
     return ResolvedConfig(
         web=resolve_web_provider_config(data, registry, environ),
         llm=resolve_llm_config(data, environ),
         retry=resolve_retry_policy(data),
+        academic=academic,
+        oa_resolver=oa_resolver,
     )
 
 

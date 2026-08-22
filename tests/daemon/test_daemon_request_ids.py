@@ -22,9 +22,20 @@ class _RecordingSearch:
         self.calls.append(("keyword", request_id, current_request_id()))
         return f"keyword-{request_id}.jsonl"
 
-    async def llm_search(self, prompt: str, *, request_id: str) -> str:
+    async def llm_search(
+        self,
+        prompt: str,
+        *,
+        request_id: str,
+        scope: str = "web",
+    ) -> str:
         self.calls.append(("llm", request_id, current_request_id()))
         return f"llm-{request_id}.jsonl"
+
+
+class _RecordingPaper:
+    async def paper_search(self, query: str, *, request_id: str) -> str:
+        return f"paper-{request_id}.jsonl"
 
 
 class _RecordingFetch:
@@ -39,6 +50,7 @@ class _RecordingFetch:
 class _Runtime:
     def __init__(self) -> None:
         self.search_orchestrator = _RecordingSearch()
+        self.paper_search_orchestrator = _RecordingPaper()
         self.fetch_orchestrator = _RecordingFetch()
 
     async def aclose(self) -> None:

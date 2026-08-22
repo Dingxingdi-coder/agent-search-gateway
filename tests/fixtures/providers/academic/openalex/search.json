@@ -1,0 +1,44 @@
+{
+  "results": [
+    {
+      "id": "https://openalex.org/W2741809807",
+      "doi": "https://doi.org/10.1000/OPENALEX.EXAMPLE",
+      "title": "OpenAlex Example",
+      "publication_date": "2024-03-04",
+      "cited_by_count": 77,
+      "authorships": [
+        {"author": {"display_name": "Alice Example"}},
+        {"author": {"display_name": "Bob Example"}}
+      ],
+      "abstract_inverted_index": {
+        "world": [1],
+        "Hello": [0],
+        "again": [2]
+      },
+      "primary_location": {
+        "landing_page_url": "https://publisher.example/paper",
+        "pdf_url": "https://publisher.example/paper.pdf",
+        "license": "cc-by"
+      },
+      "open_access": {
+        "is_oa": true,
+        "oa_status": "gold",
+        "oa_url": "https://publisher.example/paper.pdf"
+      },
+      "concepts": [
+        {"display_name": "Machine Learning"},
+        {"display_name": "Artificial Intelligence"}
+      ]
+    },
+    {
+      "id": "https://openalex.org/W999",
+      "title": "Fallback Landing",
+      "authorships": [],
+      "abstract_inverted_index": {},
+      "primary_location": null,
+      "open_access": {"is_oa": false, "oa_status": "closed"},
+      "concepts": []
+    },
+    {"id": "https://openalex.org/W1000"}
+  ]
+}

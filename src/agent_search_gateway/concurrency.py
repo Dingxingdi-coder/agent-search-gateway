@@ -128,6 +128,7 @@ class ProviderQuotaManager:
         *,
         web_limits: Mapping[str, int],
         llm_limits: Mapping[str, int],
+        academic_limits: Mapping[str, int] | None = None,
         logger: logging.Logger | None = None,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -152,12 +153,25 @@ class ProviderQuotaManager:
             )
             for name, limit in llm_limits.items()
         }
+        self._academic = {
+            name: CapacityGate(
+                limit,
+                provider=name,
+                quota_kind="academic",
+                logger=event_logger,
+                monotonic=monotonic,
+            )
+            for name, limit in (academic_limits or {}).items()
+        }
 
     def get_web(self, name: str) -> CapacityGate:
         return self._web[name]
 
     def get_llm(self, name: str) -> CapacityGate:
         return self._llm[name]
+
+    def get_academic(self, name: str) -> CapacityGate:
+        return self._academic[name]
 
     async def wait_until_any_web_available(self, candidate_names: tuple[str, ...]) -> None:
         if not candidate_names:

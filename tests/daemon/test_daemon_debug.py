@@ -20,8 +20,19 @@ class _Search:
     async def keyword_search(self, query: str, *, request_id: str) -> str:
         return query
 
-    async def llm_search(self, prompt: str, *, request_id: str) -> str:
+    async def llm_search(
+        self,
+        prompt: str,
+        *,
+        request_id: str,
+        scope: str = "web",
+    ) -> str:
         return prompt
+
+
+class _Paper:
+    async def paper_search(self, query: str, *, request_id: str) -> str:
+        return f"paper:{query}"
 
 
 class _Fetch:
@@ -32,6 +43,7 @@ class _Fetch:
 class _Runtime:
     def __init__(self) -> None:
         self.search_orchestrator = _Search()
+        self.paper_search_orchestrator = _Paper()
         self.fetch_orchestrator = _Fetch()
         self.close_calls = 0
 
@@ -117,6 +129,8 @@ async def test_default_runtime_registers_resolved_secrets_before_runtime_build(
     paths = RuntimePaths.from_home(tmp_path)
     first_secret = SecretValue("web-secret-value")
     second_secret = SecretValue("llm-secret-value")
+    third_secret = SecretValue("academic-secret-value")
+    fourth_secret = SecretValue("contact-secret-value")
     config = SimpleNamespace(
         web=SimpleNamespace(
             providers=(
@@ -125,28 +139,60 @@ async def test_default_runtime_registers_resolved_secrets_before_runtime_build(
             )
         ),
         llm=SimpleNamespace(providers=(SimpleNamespace(secret=second_secret),)),
+        academic=SimpleNamespace(
+            providers=(
+                SimpleNamespace(api_key=third_secret, contact_email=None),
+            )
+        ),
+        oa_resolver=SimpleNamespace(api_key=None, contact_email=fourth_secret),
     )
     registry = object()
+    expected_academic_registry = object()
+    expected_resolver_registry = object()
     runtime = _Runtime()
 
     monkeypatch.setattr("agent_search_gateway.daemon.build_default_registry", lambda: registry)
-    monkeypatch.setattr("agent_search_gateway.daemon.load_toml", lambda path: {})
     monkeypatch.setattr(
-        "agent_search_gateway.daemon.resolve_config",
-        lambda data, received_registry, environ: config,
+        "agent_search_gateway.daemon.build_default_academic_registry",
+        lambda: expected_academic_registry,
     )
+    monkeypatch.setattr(
+        "agent_search_gateway.daemon.build_default_oa_resolver_registry",
+        lambda: expected_resolver_registry,
+    )
+    monkeypatch.setattr("agent_search_gateway.daemon.load_toml", lambda path: {})
+
+    def fake_resolve(
+        data: object,
+        received_registry: object,
+        environ: object,
+        *,
+        academic_registry: object,
+        oa_resolver_registry: object,
+    ) -> object:
+        assert received_registry is registry
+        assert academic_registry is expected_academic_registry
+        assert oa_resolver_registry is expected_resolver_registry
+        return config
+
+    monkeypatch.setattr("agent_search_gateway.daemon.resolve_config", fake_resolve)
 
     def fake_build(
         config_value: object,
         runtime_paths: RuntimePaths,
         *,
         registry: object,
+        academic_registry: object,
+        oa_resolver_registry: object,
     ) -> _Runtime:
         log_event(
             logging.getLogger("agent_search_gateway.runtime"),
             logging.DEBUG,
             "runtime_probe",
-            detail=f"{first_secret.reveal()} {second_secret.reveal()}",
+            detail=(
+                f"{first_secret.reveal()} {second_secret.reveal()} "
+                f"{third_secret.reveal()} {fourth_secret.reveal()}"
+            ),
         )
         return runtime
 
@@ -162,7 +208,9 @@ async def test_default_runtime_registers_resolved_secrets_before_runtime_build(
     text = paths.debug_log_file.read_text(encoding="utf-8")
     assert "web-secret-value" not in text
     assert "llm-secret-value" not in text
-    assert "detail=\"<redacted> <redacted>\"" in text
+    assert third_secret.reveal() not in text
+    assert fourth_secret.reveal() not in text
+    assert "detail=\"<redacted> <redacted> <redacted> <redacted>\"" in text
 
 
 async def test_debug_workflow_lifecycle_logs_are_correlated_and_payload_safe(
@@ -176,7 +224,13 @@ async def test_debug_workflow_lifecycle_logs_are_correlated_and_payload_safe(
                 raise RuntimeError("debug internal detail")
             return "result"
 
-        async def llm_search(self, prompt: str, *, request_id: str) -> str:
+        async def llm_search(
+            self,
+            prompt: str,
+            *,
+            request_id: str,
+            scope: str = "web",
+        ) -> str:
             return "unused"
 
     paths = RuntimePaths.from_home(tmp_path)

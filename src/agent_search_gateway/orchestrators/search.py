@@ -6,17 +6,25 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+from ..academic.aggregator import PaperAggregator
 from ..concurrency import ProviderQuotaManager
 from ..errors import ErrorCode, ExecutionFailure, InputFailure
 from ..llm.stages import LLMStages, cheap_check
 from ..llm_search_parser import parse_search_markdown
-from ..models import LLMInvocation, SearchRecord
+from ..models import LLMInvocation, LLMSearchScope, PaperRecord, SearchRecord
 from ..observability import elapsed_ms, log_event, target_url_for_log
-from ..providers.contracts import KeywordSearchHit, KeywordSearchProvider
+from ..paper_search_parser import parse_paper_markdown
+from ..providers.contracts import (
+    KeywordSearchHit,
+    KeywordSearchProvider,
+    OAResolver,
+    PaperSearchHit,
+)
 from ..request_ids import validate_request_id
 from ..result_writer import ResultWriter
 from ..url_normalization import NormalizedURL, normalize_url
 from ..url_store import URLStore
+from .paper import finalize_paper_hits
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +46,8 @@ class SearchOrchestrator:
         stages: LLMStages,
         store: URLStore,
         result_writer: ResultWriter,
+        paper_aggregator: PaperAggregator | None = None,
+        paper_resolver: OAResolver | None = None,
         logger: logging.Logger | None = None,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -47,6 +57,10 @@ class SearchOrchestrator:
         self._stages = stages
         self._store = store
         self._result_writer = result_writer
+        self._paper_aggregator = paper_aggregator or PaperAggregator(
+            tuple(f"llm:{invocation.provider}" for invocation in self._llm_invocations)
+        )
+        self._paper_resolver = paper_resolver
         self._logger = logger or logging.getLogger(__name__)
         self._monotonic = monotonic
 
@@ -112,30 +126,85 @@ class SearchOrchestrator:
         )
         return str(path)
 
-    async def llm_search(self, prompt: str, *, request_id: str) -> str:
+    async def llm_search(
+        self,
+        prompt: str,
+        *,
+        request_id: str,
+        scope: LLMSearchScope = "web",
+    ) -> str:
         validate_request_id(request_id)
         normalized_prompt = prompt.strip()
         if not normalized_prompt:
             raise InputFailure(ErrorCode.EMPTY_QUERY, "Prompt must not be empty")
+        if scope not in {"web", "paper", "all"}:
+            raise InputFailure(ErrorCode.BAD_REQUEST, "LLM search scope is invalid")
         if not self._llm_invocations:
             raise ExecutionFailure(
                 ErrorCode.NO_LLM_SEARCH_PROVIDERS,
                 "No LLM search providers are configured",
             )
 
+        if scope == "web":
+            web_records = await self._llm_web_records(normalized_prompt)
+            path = self._result_writer.write_results("llm", web_records, request_id=request_id)
+            self._log_results_written(path=str(path), results=len(web_records))
+            return str(path)
+
+        if scope == "paper":
+            paper_records = await self._llm_paper_records(normalized_prompt)
+            path = self._result_writer.write_paper_results(
+                "llm",
+                paper_records,
+                request_id=request_id,
+            )
+            self._log_results_written(path=str(path), results=len(paper_records))
+            return str(path)
+
+        web_outcome, paper_outcome = await asyncio.gather(
+            self._llm_web_records(normalized_prompt),
+            self._llm_paper_records(normalized_prompt),
+            return_exceptions=True,
+        )
+        if isinstance(web_outcome, BaseException):
+            self._log_branch_failure("web", web_outcome)
+            mixed_web_records: list[SearchRecord] = []
+        else:
+            mixed_web_records = web_outcome
+        if isinstance(paper_outcome, BaseException):
+            self._log_branch_failure("paper", paper_outcome)
+            mixed_paper_records: list[PaperRecord] = []
+        else:
+            mixed_paper_records = paper_outcome
+        if isinstance(web_outcome, BaseException) and isinstance(
+            paper_outcome,
+            BaseException,
+        ):
+            raise ExecutionFailure(
+                ErrorCode.ALL_PROVIDERS_FAILED,
+                "All LLM search branches failed",
+            )
+        path = self._result_writer.write_mixed_results(
+            mixed_web_records,
+            mixed_paper_records,
+            request_id=request_id,
+        )
+        self._log_results_written(
+            path=str(path),
+            results=len(mixed_web_records) + len(mixed_paper_records),
+        )
+        return str(path)
+
+    async def _llm_web_records(self, prompt: str) -> list[SearchRecord]:
         outcomes = await asyncio.gather(
-            *(
-                self._run_llm_pipeline(invocation, normalized_prompt)
-                for invocation in self._llm_invocations
-            ),
+            *(self._run_llm_pipeline(invocation, prompt) for invocation in self._llm_invocations),
             return_exceptions=True,
         )
         if not any(isinstance(outcome, list) for outcome in outcomes):
             raise ExecutionFailure(
                 ErrorCode.ALL_PROVIDERS_FAILED,
-                "All LLM search provider pipelines failed",
+                "All LLM web search provider pipelines failed",
             )
-
         ordered_urls: list[NormalizedURL] = []
         seen: set[NormalizedURL] = set()
         for outcome in outcomes:
@@ -146,17 +215,50 @@ class SearchOrchestrator:
                 if result.url not in seen:
                     seen.add(result.url)
                     ordered_urls.append(result.url)
-        records = [self._record_from_store(url) for url in ordered_urls]
-        path = self._result_writer.write_results("llm", records, request_id=request_id)
+        return [self._record_from_store(url) for url in ordered_urls]
+
+    async def _llm_paper_records(self, prompt: str) -> list[PaperRecord]:
+        outcomes = await asyncio.gather(
+            *(
+                self._run_llm_paper_pipeline(invocation, prompt)
+                for invocation in self._llm_invocations
+            ),
+            return_exceptions=True,
+        )
+        if not any(isinstance(outcome, list) for outcome in outcomes):
+            raise ExecutionFailure(
+                ErrorCode.ALL_PROVIDERS_FAILED,
+                "All LLM paper search provider pipelines failed",
+            )
+        hits: list[PaperSearchHit] = []
+        for outcome in outcomes:
+            if isinstance(outcome, list):
+                hits.extend(outcome)
+        return await finalize_paper_hits(
+            hits,
+            aggregator=self._paper_aggregator,
+            resolver=self._paper_resolver,
+            store=self._store,
+        )
+
+    def _log_results_written(self, *, path: str, results: int) -> None:
         log_event(
             self._logger,
             logging.DEBUG,
             "results_written",
             kind="llm",
-            path=str(path),
-            results=len(records),
+            path=path,
+            results=results,
         )
-        return str(path)
+
+    def _log_branch_failure(self, scope: str, exc: BaseException) -> None:
+        log_event(
+            self._logger,
+            logging.DEBUG,
+            "llm_search_branch_failed",
+            scope=scope,
+            error_type=type(exc).__name__,
+        )
 
     async def _run_llm_pipeline(
         self,
@@ -198,6 +300,47 @@ class SearchOrchestrator:
             elapsed_ms=elapsed_ms(self._monotonic, started),
         )
         return records
+
+    async def _run_llm_paper_pipeline(
+        self,
+        invocation: LLMInvocation,
+        prompt: str,
+    ) -> list[PaperSearchHit]:
+        started = self._monotonic()
+        log_event(
+            self._logger,
+            logging.DEBUG,
+            "provider_started",
+            provider=invocation.provider,
+            stage="llm_paper_search",
+            model=invocation.model,
+        )
+        try:
+            markdown = await self._stages.llm_paper_search_markdown(invocation, prompt)
+            hits = parse_paper_markdown(markdown, provider=invocation.provider)
+        except asyncio.CancelledError:
+            raise
+        except ExecutionFailure as exc:
+            self._log_provider_failure(invocation.provider, "llm_paper_search", started, exc)
+            raise
+        except Exception as exc:
+            self._log_provider_failure(invocation.provider, "llm_paper_search", started, exc)
+            raise ExecutionFailure(
+                ErrorCode.ALL_PROVIDERS_FAILED,
+                f"LLM paper search provider {invocation.provider} returned invalid data",
+            ) from exc
+        log_event(
+            self._logger,
+            logging.DEBUG,
+            "provider_completed",
+            provider=invocation.provider,
+            stage="llm_paper_search",
+            model=invocation.model,
+            output_chars=len(markdown),
+            results=len(hits),
+            elapsed_ms=elapsed_ms(self._monotonic, started),
+        )
+        return hits
 
     async def _run_keyword_pipeline(
         self,

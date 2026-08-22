@@ -29,8 +29,19 @@ class _SlowSearch:
             raise
         return f"keyword:{query}"
 
-    async def llm_search(self, prompt: str, *, request_id: str) -> str:
+    async def llm_search(
+        self,
+        prompt: str,
+        *,
+        request_id: str,
+        scope: str = "web",
+    ) -> str:
         return f"llm:{prompt}"
+
+
+class _Paper:
+    async def paper_search(self, query: str, *, request_id: str) -> str:
+        return f"paper:{query}"
 
 
 class _Fetch:
@@ -41,6 +52,7 @@ class _Fetch:
 class _Runtime:
     def __init__(self) -> None:
         self.search_orchestrator = _SlowSearch()
+        self.paper_search_orchestrator = _Paper()
         self.fetch_orchestrator = _Fetch()
         self.close_calls = 0
 

@@ -206,3 +206,91 @@ async def test_http_executor_logs_transport_retry_without_exception_or_payload_t
     assert "status=200" in logged
     assert "TRANSPORT_DETAIL_SENTINEL" not in logged
     assert "REQUEST_BODY_SENTINEL" not in logged
+
+
+async def test_http_executor_passes_query_params_without_logging_values() -> None:
+    seen_url = ""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal seen_url
+        seen_url = str(request.url)
+        return httpx.Response(200, json={"ok": True}, request=request)
+
+    logger, stream = structured_test_logger("tests.http.params")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        executor = HttpJsonExecutor(
+            client,
+            RetryPolicy(1, 0.01, 0.02, 1.0),
+            provider_name="fake",
+            logger=logger,
+            sleep=_no_sleep,
+        )
+        result = await executor.request_json(
+            "GET",
+            "https://provider.example.test/search",
+            stage="search",
+            params={"q": "QUERY_PARAM_SENTINEL", "email": "CONTACT_SENTINEL@example.test"},
+        )
+
+    assert result == {"ok": True}
+    assert "QUERY_PARAM_SENTINEL" in seen_url
+    assert "CONTACT_SENTINEL" in seen_url
+    logged = stream.getvalue()
+    assert "endpoint=https://provider.example.test/search" in logged
+    assert "QUERY_PARAM_SENTINEL" not in logged
+    assert "CONTACT_SENTINEL" not in logged
+
+
+async def test_http_executor_text_mode_retries_without_json_decoding() -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(503, text="retry-body", request=request)
+        return httpx.Response(200, text="<feed>not-json</feed>", request=request)
+
+    logger, stream = structured_test_logger("tests.http.text")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        executor = HttpJsonExecutor(
+            client,
+            RetryPolicy(2, 0.01, 0.02, 1.0),
+            provider_name="fake",
+            logger=logger,
+            sleep=_no_sleep,
+        )
+        result = await executor.request_text(
+            "GET",
+            "https://provider.example.test/feed",
+            stage="search",
+        )
+
+    assert result == "<feed>not-json</feed>"
+    assert attempts == 2
+    assert "event=http_retrying" in stream.getvalue()
+
+
+async def test_http_executor_status_failure_carries_terminal_status_code() -> None:
+    from agent_search_gateway.providers.http import HttpStatusFailure
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, text="DO_NOT_EXPOSE_BODY", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        executor = HttpJsonExecutor(
+            client,
+            RetryPolicy(1, 0.01, 0.02, 1.0),
+            provider_name="fake",
+            sleep=_no_sleep,
+        )
+        with pytest.raises(HttpStatusFailure) as caught:
+            await executor.request_text(
+                "GET",
+                "https://provider.example.test/missing",
+                stage="resolve",
+            )
+
+    assert caught.value.status_code == 404
+    assert caught.value.code is ErrorCode.ALL_PROVIDERS_FAILED
+    assert "DO_NOT_EXPOSE_BODY" not in caught.value.message
