@@ -691,4 +691,3 @@ Use a separate `[academic_providers]` group with per-provider `enabled`, `max_co
   - Re-read the architecture, error-handling, and testing specs and verify every public contract, normalization/identity rule, partial-success rule, OA failure rule, output schema, logging rule, and lifecycle rule has both implementation coverage and a regression test.
   - Remove dead helpers, provider-local retry/fallback code, arbitrary provider `extra` state, hidden transport fallback, and test-only production hooks.
   - Re-run `uv run ruff check .`, `uv run mypy src tests`, and `uv run pytest -v` after cleanup.
-
