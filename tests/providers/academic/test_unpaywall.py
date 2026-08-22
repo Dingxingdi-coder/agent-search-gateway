@@ -83,6 +83,36 @@ async def test_unpaywall_handles_landing_only_and_deterministic_alternate_fallba
     assert str(second.landing_url) == "https://a.example"
 
 
+async def test_unpaywall_skips_invalid_best_location_for_valid_alternate() -> None:
+    payload = {
+        "is_oa": True,
+        "oa_status": "green",
+        "best_oa_location": {
+            "url_for_landing_page": "not-a-url",
+            "url_for_pdf": "ftp://invalid.example/paper.pdf",
+        },
+        "oa_locations": [
+            {
+                "url_for_landing_page": "https://valid.example/landing",
+                "url_for_pdf": "https://valid.example/paper.pdf",
+                "license": "cc-by",
+            }
+        ],
+    }
+    executor = RecordingJsonExecutor([payload])
+    resolver = UnpaywallResolver(
+        executor,
+        contact_email=SecretValue("[REDACTED_SECRET]"),
+    )
+
+    resolved = await resolver.resolve("10.1000/alternate-valid")
+
+    assert resolved is not None
+    assert str(resolved.landing_url) == "https://valid.example/landing"
+    assert str(resolved.pdf_url) == "https://valid.example/paper.pdf"
+    assert resolved.license == "cc-by"
+
+
 async def test_unpaywall_non_oa_and_404_are_normal_results() -> None:
     executor = RecordingJsonExecutor(
         [

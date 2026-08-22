@@ -371,7 +371,7 @@ Use a separate `[academic_providers]` group with per-provider `enabled`, `max_co
 
 **Files:**
 - Create: `src/agent_search_gateway/providers/academic/defaults.py`
-- Create: `tests/providers/academic/test_registry.py`
+- Create: `tests/providers/academic/test_registry_defaults.py`
 - Reuse: `src/agent_search_gateway/providers/academic/registry.py`
 
 - [ ] **Step 1: Write failing built-in registration tests**
@@ -381,13 +381,13 @@ Use a separate `[academic_providers]` group with per-provider `enabled`, `max_co
   - Only intended options (v1: `api_url`) are accepted; resolver never appears in discovery iteration.
 
 - [ ] **Step 2: Run RED**
-  - Run: `uv run pytest tests/providers/academic/test_registry.py -v`
+  - Run: `uv run pytest tests/providers/academic/test_registry_defaults.py -v`
 
 - [ ] **Step 3: Implement default builders**
   - Add separate default discovery and OA-resolver builders with concrete factories and requirement metadata.
 
 - [ ] **Step 4: Verify GREEN + full suite**
-  - Run: `uv run pytest tests/providers/academic/test_registry.py tests/unit/test_config_academic_providers.py -v`
+  - Run: `uv run pytest tests/providers/academic/test_registry_defaults.py tests/unit/test_config_academic_providers.py -v`
   - Run: `uv run pytest -q`
 
 - [ ] **Step 5: Refactor and rerun**

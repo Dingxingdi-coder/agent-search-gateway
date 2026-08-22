@@ -107,12 +107,11 @@ class UnpaywallResolver:
         candidates.sort(key=self._location_sort_key)
         return candidates[0] if candidates else best
 
-    @staticmethod
-    def _location_has_url(location: Mapping[str, object]) -> bool:
-        return bool(
-            text(location.get("url_for_pdf"))
-            or text(location.get("url_for_landing_page"))
-            or text(location.get("url"))
+    @classmethod
+    def _location_has_url(cls, location: Mapping[str, object]) -> bool:
+        return (
+            cls._location_url(location, landing=True) is not None
+            or cls._location_url(location, landing=False) is not None
         )
 
     @staticmethod
