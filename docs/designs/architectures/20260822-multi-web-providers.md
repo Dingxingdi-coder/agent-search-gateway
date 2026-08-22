@@ -34,7 +34,7 @@
 #### Todo
 
 - Apify integration and Actor selection/configuration.
-- ZenRows keyword search through a future/current non-deprecated structured search contract. The legacy per-site Scraper APIs are not used for this new integration.
+- ZenRows keyword search through its current dedicated Google Search Results API. This batch keeps ZenRows fetch-only because the search API uses a separate `serp.api.zenrows.com` endpoint and a clean second-endpoint configuration is deferred rather than hard-coded into the adapter.
 - ScrapingAnt keyword search. The current selected API exposes scraping/Markdown/AI extraction rather than a dedicated deterministic structured SERP contract; this design does not add a Google SERP parser or an AI extraction prompt/schema merely to synthesize `KeywordSearchHit` values.
 - Optional provider controls such as country, language, locale, device, JavaScript rendering, premium/residential proxy selection, result count, pagination, freshness/cache controls, safe search, sessions, and provider-specific advanced modes.
 - Generic provider option passthrough or a declarative HTTP-provider DSL.
@@ -169,13 +169,13 @@ The nine providers are added as ordinary built-in adapters behind the existing s
 - Rejected Alternatives:
   - Expose localization/device/page controls now: rejected as optional tuning.
 
-##### ZenRows Is Fetch-Only on the Current Fetch API
+##### ZenRows Is Fetch-Only in This Batch
 
-- Description: Register `zenrows` with `search=False, fetch=True`. `ZenRowsAdapter.fetch()` calls the current Fetch API and requests Markdown for the normalized URL.
-- Rationale: ZenRows positions Fetch as the replacement for legacy per-site Scraper APIs. A new gateway integration should not depend on a deprecated structured Google endpoint. Implementing search from Fetch would require local Google SERP parsing or an extraction schema, neither of which belongs in the current search-provider architecture.
-- Trade-offs: ZenRows cannot participate in `keyword-search` in this version despite historical/legacy SERP support.
+- Description: Register `zenrows` with `search=False, fetch=True`. `ZenRowsAdapter.fetch()` uses the selected ZenRows page-fetch path and requests Markdown for the normalized URL.
+- Rationale: ZenRows currently exposes a dedicated structured Google Search Results API on the separate `serp.api.zenrows.com` host. This batch intentionally keeps the existing one-`api_url` ZenRows configuration focused on page fetch; adding search cleanly would require selecting and whitelisting a second endpoint rather than silently hard-coding or deriving a host that the configured `api_url` does not control.
+- Trade-offs: ZenRows cannot participate in `keyword-search` in this version even though the vendor now offers a native structured SERP API.
 - Rejected Alternatives:
-  - Deprecated structured Google endpoint: rejected for new integration.
+  - Hard-code a second SERP host while leaving only `api_url` configurable: rejected because endpoint configuration would become inconsistent and difficult to test or override.
   - Fetch Google and parse locally: rejected as brittle SERP parser coupling.
   - AI Extract to synthesize results: rejected due prompt/schema semantics, cost, and nondeterminism.
 
@@ -558,7 +558,7 @@ These examples intentionally expose no optional vendor tuning fields.
 
 - Bright Data: SERP API and Web Unlocker share `/request`, use Bearer auth and configured zones; SERP supplies structured search and Web Unlocker supports page/Markdown output.
 - Scrape.do: `/plugin/google/search` supplies structured JSON; normal scrape supports `output=markdown`.
-- ZenRows: new integrations use current Fetch; legacy per-site Scraper APIs are not selected.
+- ZenRows: a current dedicated Google Search Results API exists on `serp.api.zenrows.com`, but this batch selects only the page-fetch Markdown path and intentionally defers a second configurable search endpoint.
 - Decodo: current Web Scraping API supports `google_search` with `parse=true` and Markdown response mode using Basic token auth.
 - ScrapingDog: `/google` supplies structured organic results and `/scrape` supplies target content.
 - ScrapeGraphAI: v2 exposes JSON `POST /api/search` and `POST /api/scrape` with `SGAI-APIKEY`; v1 is not selected.

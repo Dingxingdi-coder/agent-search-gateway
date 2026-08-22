@@ -259,14 +259,14 @@ ZenRows is fetch-only.
 Assert:
 
 - registry/config rejects `enable_search=true` separately in capability tests;
-- adapter uses the current Fetch API selected by the architecture, not a legacy per-site Google Scraper API;
-- target URL and API credential are placed according to current Fetch contract;
+- adapter uses the page-fetch API selected by the architecture and does not call the separately hosted Google Search Results API;
+- target URL and API credential are placed according to the selected fetch contract;
 - Markdown output is requested;
 - non-empty Markdown maps to the candidate;
 - empty text fails;
 - no JS render/premium proxy/country/session options are injected by default.
 
-Add a negative regression assertion that the generated request path does not contain the legacy structured Google scraper endpoint selected against in the architecture.
+Add a negative regression assertion that the generated fetch request does not target the separately hosted `serp.api.zenrows.com` search API that is intentionally deferred in this batch.
 
 ---
 
@@ -548,7 +548,7 @@ Fixtures should contain only fields needed to prove stable mapping plus one or t
 |---|---:|---:|---:|---:|---:|
 | Bright Data | yes | yes | yes | yes | zones + Bearer |
 | Scrape.do | yes | yes | yes | yes | query token + Markdown |
-| ZenRows | n/a | capability rejection | yes | yes | current Fetch, not legacy search |
+| ZenRows | n/a | capability rejection | yes | yes | fetch-only; dedicated SERP endpoint deferred |
 | Decodo | yes | yes | yes | yes | opaque Basic token |
 | ScrapingDog | yes | yes | yes | yes | `/google` vs `/scrape` |
 | ScrapeGraphAI | yes | yes | yes | yes | v2 + `SGAI-APIKEY` |

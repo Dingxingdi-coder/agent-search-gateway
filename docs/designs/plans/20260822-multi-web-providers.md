@@ -584,7 +584,7 @@ Expected: both pass.
 
 ---
 
-### Task 6: Implement ZenRows as current-Fetch-API-only
+### Task 6: Implement ZenRows as fetch-only in this batch
 
 **Files:**
 - Create: `src/agent_search_gateway/providers/web/zenrows.py`
@@ -600,9 +600,9 @@ Scenario:
 ```text
 Construct fetch-only ZenRowsAdapter with api_url + SecretValue + TextRequester.
 Fetch a normalized target URL.
-Assert credential and target mapping follow the selected current Fetch API.
+Assert credential and target mapping follow the selected page-fetch API.
 Assert Markdown output is explicitly selected.
-Assert request path is not the legacy per-site Google scraper endpoint rejected by the architecture.
+Assert the fetch request does not target the separately hosted `serp.api.zenrows.com` Google Search Results API deferred by the architecture.
 Assert JS rendering, premium proxy, country, session, and other optional controls are absent.
 Assert returned non-empty Markdown => URLFetchCandidate(raw_content=text, content=text).
 ```
@@ -621,7 +621,7 @@ Expected: adapter missing.
 
 ```text
 constructor requires non-empty api_url
-build current Fetch API request using only credential + target + Markdown selector
+build the selected page-fetch request using only credential + target + Markdown selector
 call request_text(stage="fetch")
 reject empty/whitespace text with failure(name, "fetch", "page body is empty")
 return URLFetchCandidate(text, text)
@@ -1688,7 +1688,7 @@ Expected: all green.
 | Query/userinfo/fragment redaction and no body logging | 1, 2, 5, 8, 10, 20 |
 | Bright Data Search + Fetch with independent zones | 3, 4 |
 | Scrape.do Search + Markdown Fetch | 5 |
-| ZenRows fetch-only, current Fetch API, no legacy Search | 6, 16, 17 |
+| ZenRows fetch-only in this batch; dedicated SERP endpoint deferred | 6, 16, 17 |
 | Decodo Search + Fetch with opaque Basic token | 7 |
 | ScrapingDog `/google` + `/scrape` | 8 |
 | ScrapeGraphAI v2 only with `SGAI-APIKEY` | 9 |
