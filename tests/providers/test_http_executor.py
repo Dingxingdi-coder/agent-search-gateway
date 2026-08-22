@@ -78,6 +78,7 @@ async def test_http_executor_retries_retryable_status_and_hides_sensitive_payloa
 
 async def test_http_executor_classifies_invalid_json_as_protocol_failure_without_retry() -> None:
     attempts = 0
+    times = iter([0.0, 10.0, 11.0, 12.0])
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal attempts
@@ -92,6 +93,7 @@ async def test_http_executor_classifies_invalid_json_as_protocol_failure_without
             provider_name="fake",
             logger=logger,
             sleep=_no_sleep,
+            monotonic=lambda: next(times),
         )
         with pytest.raises(ProtocolFailure) as caught:
             await executor.request_json(
@@ -107,8 +109,10 @@ async def test_http_executor_classifies_invalid_json_as_protocol_failure_without
     assert "event=http_attempt_completed" in logged
     assert "status=200" in logged
     assert "event=http_failed" in logged
-    assert "category=decode" in logged
-    assert "elapsed_ms=" in logged
+    failed_line = next(line for line in logged.splitlines() if "event=http_failed" in line)
+    assert "category=decode" in failed_line
+    assert "attempt=1" in failed_line
+    assert "elapsed_ms=2000" in failed_line
     assert "not-json" not in logged
 
 

@@ -15,12 +15,16 @@ from .url_normalization import normalize_url
 PaperResultKind = Literal["paper", "llm"]
 
 
-def _serialize_record(record: SearchRecord) -> str:
+def _web_payload(record: SearchRecord) -> dict[str, object]:
     abstract = record.abstract.strip()
     if not abstract:
         raise ValueError("search result abstract must be non-empty")
+    return {"url": str(record.url), "abstract": abstract}
+
+
+def _serialize_record(record: SearchRecord) -> str:
     return json.dumps(
-        {"url": str(record.url), "abstract": abstract},
+        _web_payload(record),
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -125,9 +129,8 @@ def _serialize_paper_record(record: PaperRecord) -> str:
 
 
 def _serialize_mixed_web(record: SearchRecord) -> str:
-    payload = json.loads(_serialize_record(record))
     return json.dumps(
-        {"type": "web", **payload},
+        {"type": "web", **_web_payload(record)},
         ensure_ascii=False,
         separators=(",", ":"),
     )

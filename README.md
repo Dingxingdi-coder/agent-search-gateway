@@ -164,7 +164,7 @@ Fetch a URL that has already been admitted by a successful search. The final pos
 agent-search-gateway url-fetch "https://example.com/article" "pricing details"
 ```
 
-`keyword-search` and `llm-search` print the absolute path of a newly created JSONL result file. Each line contains exactly two public fields:
+`keyword-search` and `llm-search --scope web` print the absolute path of a newly created JSONL result file. Each line contains exactly two public fields:
 
 ```json
 {"url":"https://example.com/article","abstract":"Short search abstract"}

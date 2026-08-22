@@ -315,11 +315,6 @@ def resolve_academic_provider_config(
             label=f"academic provider {name}",
             environ=environ,
         )
-        if not enabled:
-            auth_env = None
-            auth_value = None
-            contact_env = None
-            contact_value = None
         providers.append(
             ResolvedAcademicProviderConfig(
                 name,

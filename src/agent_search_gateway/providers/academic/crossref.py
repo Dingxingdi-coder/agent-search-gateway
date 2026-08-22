@@ -142,8 +142,16 @@ class CrossrefProvider:
             if not parts or isinstance(parts[0], bool) or not isinstance(parts[0], int):
                 continue
             year = parts[0]
-            month = parts[1] if len(parts) > 1 and isinstance(parts[1], int) else 1
-            day = parts[2] if len(parts) > 2 and isinstance(parts[2], int) else 1
+            month = (
+                parts[1]
+                if len(parts) > 1 and isinstance(parts[1], int) and not isinstance(parts[1], bool)
+                else 1
+            )
+            day = (
+                parts[2]
+                if len(parts) > 2 and isinstance(parts[2], int) and not isinstance(parts[2], bool)
+                else 1
+            )
             try:
                 return date(year, month, day)
             except ValueError:

@@ -24,6 +24,7 @@ async def test_llm_paper_stage_uses_separate_strict_prompt_and_safe_logging() ->
     ) == output
 
     messages = client.text_calls[0][1]
+    assert any("USER_PAPER_PROMPT_SENTINEL" in message["content"] for message in messages)
     prompt = "\n".join(message["content"] for message in messages)
     for field in (
         "## Paper",

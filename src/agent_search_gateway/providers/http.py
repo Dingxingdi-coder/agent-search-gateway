@@ -61,7 +61,7 @@ class HttpJsonExecutor:
         params: Mapping[str, Any] | None = None,
         json_body: object | None = None,
     ) -> object:
-        response = await self._request_response(
+        response, attempt, attempt_started = await self._request_response(
             method,
             url,
             stage=stage,
@@ -75,10 +75,9 @@ class HttpJsonExecutor:
             self._log_failed(
                 stage,
                 http_endpoint_for_log(url),
-                1,
-                self._monotonic(),
+                attempt,
+                attempt_started,
                 "decode",
-                elapsed_override=0,
             )
             raise ProtocolFailure(
                 ErrorCode.PROTOCOL_ERROR,
@@ -95,7 +94,7 @@ class HttpJsonExecutor:
         params: Mapping[str, Any] | None = None,
         json_body: object | None = None,
     ) -> str:
-        response = await self._request_response(
+        response, _, _ = await self._request_response(
             method,
             url,
             stage=stage,
@@ -114,7 +113,7 @@ class HttpJsonExecutor:
         headers: Mapping[str, str] | None,
         params: Mapping[str, Any] | None,
         json_body: object | None,
-    ) -> httpx.Response:
+    ) -> tuple[httpx.Response, int, float]:
         attempt = 0
         attempt_started = self._monotonic()
         log_endpoint = http_endpoint_for_log(url)
@@ -221,7 +220,7 @@ class HttpJsonExecutor:
                 status=response.status_code,
             )
             raise self._status_failure(stage, response.status_code)
-        return response
+        return response, attempt, attempt_started
 
     def _log_failed(
         self,
@@ -232,13 +231,8 @@ class HttpJsonExecutor:
         category: str,
         *,
         status: int | None = None,
-        elapsed_override: int | None = None,
     ) -> None:
-        attempt_elapsed_ms = (
-            elapsed_override
-            if elapsed_override is not None
-            else elapsed_ms(self._monotonic, started)
-        )
+        attempt_elapsed_ms = elapsed_ms(self._monotonic, started)
         if status is None:
             log_event(
                 self._logger,

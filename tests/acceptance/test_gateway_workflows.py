@@ -164,7 +164,10 @@ async def test_failing_direct_paper_search_writes_no_result_file(tmp_path: Path)
         results_dir=tmp_path / "results",
     )
     runtime = build_acceptance_runtime(paths)
-    runtime.paper_search_orchestrator.providers = (runtime.academic_providers[1],)
+    failing_provider = next(
+        provider for provider in runtime.academic_providers if provider.name == "crossref"
+    )
+    runtime.paper_search_orchestrator.providers = (failing_provider,)
     daemon = ForegroundDaemon(paths, runtime_factory=lambda: runtime)
     daemon_task = __import__("asyncio").create_task(daemon.start())
     await daemon.ready.wait()

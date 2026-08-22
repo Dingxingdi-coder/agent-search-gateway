@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
-from ...academic.normalization import normalize_arxiv_id
+from ...academic.normalization import normalize_arxiv_id, normalize_doi
 from ..contracts import PaperSearchHit
 from .common import AcademicHttpExecutor, parse_iso_date, protocol_failure, reject_item
 
@@ -89,7 +89,7 @@ class ArxivProvider:
             title=title,
             authors=authors,
             abstract=self._clean(self._child_text(entry, _ATOM, "summary")),
-            doi=self._child_text(entry, _ARXIV, "doi").strip(),
+            doi=normalize_doi(self._child_text(entry, _ARXIV, "doi")) or "",
             arxiv_id=source_id,
             published_date=parse_iso_date(self._child_text(entry, _ATOM, "published")),
             updated_date=parse_iso_date(self._child_text(entry, _ATOM, "updated")),

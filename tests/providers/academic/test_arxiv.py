@@ -24,7 +24,7 @@ async def test_arxiv_maps_atom_feed_and_isolates_malformed_entry() -> None:
     assert hit.title == "Example arXiv Paper"
     assert hit.authors == ("Alice Example", "Bob Example")
     assert hit.abstract == "Example abstract."
-    assert hit.doi == "10.1000/ARXIV.EXAMPLE"
+    assert hit.doi == "10.1000/arxiv.example"
     assert hit.published_date == date(2024, 1, 2)
     assert hit.updated_date == date(2024, 2, 3)
     assert hit.topics == ("cs.AI", "cs.LG")

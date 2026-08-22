@@ -46,6 +46,14 @@ async def test_crossref_maps_metadata_and_never_invents_missing_date() -> None:
     }
 
 
+def test_crossref_date_defaults_boolean_month_and_day() -> None:
+    assert CrossrefProvider._date({"published": {"date-parts": [[2024, True, False]]}}) == date(
+        2024,
+        1,
+        1,
+    )
+
+
 async def test_crossref_optional_contact_adds_mailto_only_when_configured() -> None:
     executor = RecordingJsonExecutor([{"message": {"items": []}}])
     provider = CrossrefProvider(

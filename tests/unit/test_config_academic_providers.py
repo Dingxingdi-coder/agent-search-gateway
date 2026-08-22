@@ -140,3 +140,27 @@ def test_unpaywall_is_optional_but_enabled_instance_requires_contact() -> None:
     )
     assert resolved is not None
     assert resolved.contact_email is not None
+
+    registry.register(
+        OAResolverRegistration(
+            name="other",
+            factory=_factory,
+            allowed_config_keys=frozenset(),
+            authentication="none",
+            contact="none",
+        )
+    )
+    with pytest.raises(ConfigFailure, match="only one OA resolver may be enabled"):
+        resolve_oa_resolver_config(
+            {
+                "oa_resolvers": {
+                    "unpaywall": {
+                        "enabled": True,
+                        "contact_email_env": "CONTACT_ENV",
+                    },
+                    "other": {"enabled": True},
+                }
+            },
+            registry,
+            {"CONTACT_ENV": "[REDACTED_SECRET]"},
+        )
