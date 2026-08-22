@@ -63,7 +63,7 @@ class RecordingJsonExecutor:
 
 
 class RecordingTextExecutor:
-    def __init__(self, responses: list[str]) -> None:
+    def __init__(self, responses: list[str | BaseException]) -> None:
         self._responses = list(responses)
         self.requests: list[RecordedRequest] = []
 
@@ -82,7 +82,10 @@ class RecordingTextExecutor:
         )
         if not self._responses:
             raise AssertionError("unexpected HTTP request")
-        return self._responses.pop(0)
+        response = self._responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        return response
 
 
 class RecordingHttpExecutor:
@@ -90,7 +93,7 @@ class RecordingHttpExecutor:
         self,
         *,
         json_responses: list[object] | None = None,
-        text_responses: list[str] | None = None,
+        text_responses: list[str | BaseException] | None = None,
     ) -> None:
         self._json_responses = list(json_responses or [])
         self._text_responses = list(text_responses or [])
@@ -131,4 +134,7 @@ class RecordingHttpExecutor:
         )
         if not self._text_responses:
             raise AssertionError("unexpected text HTTP request")
-        return self._text_responses.pop(0)
+        response = self._text_responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        return response
