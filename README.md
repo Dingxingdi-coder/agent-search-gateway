@@ -58,6 +58,9 @@ The results directory is created by the daemon as needed. The debug log is creat
 | Brave | yes | no |
 | AnySearch | yes | no |
 | TinyFish | yes | yes |
+| Parallel | yes | yes |
+
+Parallel accepts optional Search mode `turbo`, `basic`, or `advanced`, plus independent Search and Extract fetch policies. Extract always requests full content internally, while Search result count is left to Parallel's provider default. When enabling Parallel, set `api_key_env` to the name of the environment variable that holds the credential.
 
 Web search and fetch stages for the same provider share one concurrency quota. LLM provider transports have their own independent quotas.
 
@@ -154,4 +157,4 @@ TAVILY_API_KEY=...
 OPENAI_API_KEY=...
 ```
 
-`OPENAI_MODEL` may optionally select the chat-completions model used by the OpenAI-compatible connectivity check. These integration checks validate connectivity and basic response shape only; normal CI does not enable them.
+`OPENAI_MODEL` may optionally select the chat-completions model used by the OpenAI-compatible connectivity check. Parallel Search and Extract also have opt-in live checks; they read the environment variable formed by `PARALLEL_` + `API_KEY` in addition to the integration gate. These integration checks validate connectivity and basic response shape only; normal CI does not enable them.

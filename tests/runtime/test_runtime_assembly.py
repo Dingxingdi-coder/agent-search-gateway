@@ -9,6 +9,7 @@ from agent_search_gateway.paths import RuntimePaths
 from agent_search_gateway.providers.contracts import ProviderCapabilities
 from agent_search_gateway.providers.defaults import build_default_registry
 from agent_search_gateway.providers.registry import WebProviderRegistration
+from agent_search_gateway.providers.web.parallel import ParallelAdapter
 from agent_search_gateway.runtime import Runtime
 from tests.support.logging import structured_test_logger
 
@@ -54,6 +55,20 @@ def _config() -> dict[str, object]:
                 "enable_fetch": False,
                 "api_url": "https://disabled.example.test",
             },
+            "parallel": {
+                "enable_search": True,
+                "enable_fetch": True,
+                "api_key_env": "ENV_F",
+                "api_url": "https://parallel.example.test",
+                "mode": "turbo",
+                "search_fetch_policy": {"max_age_seconds": 3600},
+                "extract_fetch_policy": {
+                    "max_age_seconds": 600,
+                    "timeout_seconds": 30,
+                    "disable_cache_fallback": True,
+                },
+                "max_concurrency": 6,
+            },
         },
         "llm_providers": {
             "default_max_concurrency": 2,
@@ -83,6 +98,17 @@ def _config() -> dict[str, object]:
     }
 
 
+def _environment() -> dict[str, str]:
+    return {
+        "ENV_A": "RUNTIME_CREDENTIAL_SENTINEL",
+        "ENV_B": "x",
+        "ENV_C": "x",
+        "ENV_D": "x",
+        "ENV_E": "x",
+        "ENV_F": "PARALLEL_CREDENTIAL_SENTINEL",
+    }
+
+
 async def test_runtime_assembly_builds_enabled_adapters_with_shared_quotas_and_closes_clients(
     tmp_path: Path,
 ) -> None:
@@ -98,14 +124,14 @@ async def test_runtime_assembly_builds_enabled_adapters_with_shared_quotas_and_c
         ("brave", True, False),
         ("anysearch", True, False),
         ("tinyfish", True, True),
+        ("parallel", True, True),
     ]
-    environment = {
-        "ENV_A": "RUNTIME_CREDENTIAL_SENTINEL",
-        "ENV_B": "x",
-        "ENV_C": "x",
-        "ENV_D": "x",
-        "ENV_E": "x",
-    }
+    parallel_registration = registry.get("parallel")
+    assert parallel_registration is not None
+    assert parallel_registration.allowed_config_keys == frozenset(
+        {"api_url", "mode", "search_fetch_policy", "extract_fetch_policy"}
+    )
+    environment = _environment()
     resolved = resolve_config(_config(), registry, environment)
     clients: list[_CountingAsyncClient] = []
 
@@ -124,32 +150,42 @@ async def test_runtime_assembly_builds_enabled_adapters_with_shared_quotas_and_c
     assert [provider.name for provider in runtime.web_search_providers] == [
         "tavily",
         "brave",
+        "parallel",
     ]
     assert [provider.name for provider in runtime.web_fetch_providers] == [
         "tavily",
         "tinyfish",
+        "parallel",
     ]
     assert id(runtime.web_search_providers[0]) == id(runtime.web_fetch_providers[0])
+    parallel_search = runtime.web_search_providers[-1]
+    parallel_fetch = runtime.web_fetch_providers[-1]
+    assert isinstance(parallel_search, ParallelAdapter)
+    assert id(parallel_search) == id(parallel_fetch)
     assert set(runtime.llm_clients) == {"primary", "secondary"}
     assert runtime.quotas.get_web("tavily").limit == 3
     assert runtime.quotas.get_web("tinyfish").limit == 4
+    assert runtime.quotas.get_web("parallel").limit == 6
     assert runtime.quotas.get_llm("primary").limit == 2
     assert runtime.quotas.get_llm("secondary").limit == 5
     assert "RUNTIME_CREDENTIAL_SENTINEL" not in repr(runtime)
+    assert "PARALLEL_CREDENTIAL_SENTINEL" not in repr(runtime)
 
     logged = stream.getvalue()
     assert "event=runtime_built" in logged
-    assert "web_provider_count=3" in logged
-    assert "web_providers=tavily,brave,tinyfish" in logged
+    assert "web_provider_count=4" in logged
+    assert "web_providers=tavily,brave,tinyfish,parallel" in logged
     assert "llm_provider_count=2" in logged
     assert "llm_providers=primary,secondary" in logged
-    assert "web_limits=tavily:3,brave:3,tinyfish:4" in logged
+    assert "web_limits=tavily:3,brave:3,tinyfish:4,parallel:6" in logged
     assert "llm_limits=primary:2,secondary:5" in logged
     assert "RUNTIME_CREDENTIAL_SENTINEL" not in logged
+    assert "PARALLEL_CREDENTIAL_SENTINEL" not in logged
     assert "ENV_A" not in logged
+    assert "ENV_F" not in logged
 
     await runtime.aclose()
-    assert len(clients) == 5
+    assert len(clients) == 6
     assert all(client.close_calls == 1 for client in clients)
 
     bad = _config()
@@ -160,6 +196,39 @@ async def test_runtime_assembly_builds_enabled_adapters_with_shared_quotas_and_c
     brave["enable_fetch"] = True
     with pytest.raises(ConfigFailure):
         resolve_config(bad, registry, environment)
+
+
+async def test_runtime_maps_invalid_parallel_adapter_config_to_config_failure(
+    tmp_path: Path,
+) -> None:
+    registry = build_default_registry()
+    raw = _config()
+    web = raw["web_providers"]
+    assert isinstance(web, dict)
+    parallel = web["parallel"]
+    assert isinstance(parallel, dict)
+    parallel["mode"] = "invalid"
+    resolved = resolve_config(raw, registry, _environment())
+    clients: list[_CountingAsyncClient] = []
+
+    def client_factory() -> httpx.AsyncClient:
+        client = _CountingAsyncClient()
+        clients.append(client)
+        return client
+
+    with pytest.raises(
+        ConfigFailure,
+        match="Invalid configuration for web provider parallel",
+    ):
+        Runtime.build(
+            resolved,
+            RuntimePaths.from_home(tmp_path),
+            registry=registry,
+            http_client_factory=client_factory,
+        )
+
+    for client in clients:
+        await client.aclose()
 
 
 @pytest.mark.parametrize("reserved_key", ["name", "http_executor", "secret"])

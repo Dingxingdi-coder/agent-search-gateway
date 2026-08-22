@@ -1,0 +1,13 @@
+{
+  "extract_id": "extract_fixture_error",
+  "results": [],
+  "errors": [
+    {
+      "url": "https://example.com/parallel",
+      "error_type": "fetch_error",
+      "http_status_code": 500,
+      "content": "provider diagnostic text"
+    }
+  ],
+  "session_id": "session_fixture"
+}

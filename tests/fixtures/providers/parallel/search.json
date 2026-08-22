@@ -1,0 +1,15 @@
+{
+  "search_id": "search_fixture",
+  "results": [
+    {
+      "url": "https://example.com/parallel",
+      "title": "Parallel result",
+      "publish_date": "2026-01-01",
+      "excerpts": [
+        "First relevant excerpt.",
+        "Second relevant excerpt."
+      ]
+    }
+  ],
+  "session_id": "session_fixture"
+}

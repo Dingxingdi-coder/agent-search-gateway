@@ -1,0 +1,13 @@
+{
+  "extract_id": "extract_fixture",
+  "results": [
+    {
+      "url": "https://example.com/parallel",
+      "title": "Parallel result",
+      "excerpts": ["Excerpted text"],
+      "full_content": "# Parallel page\n\nFull page content."
+    }
+  ],
+  "errors": [],
+  "session_id": "session_fixture"
+}

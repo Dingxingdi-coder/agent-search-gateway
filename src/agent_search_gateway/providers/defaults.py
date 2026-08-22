@@ -7,6 +7,7 @@ from .web.brave import BraveAdapter
 from .web.exa import ExaAdapter
 from .web.firecrawl import FirecrawlAdapter
 from .web.linkup import LinkupAdapter
+from .web.parallel import ParallelAdapter
 from .web.tavily import TavilyAdapter
 from .web.tinyfish import TinyFishAdapter
 
@@ -55,6 +56,14 @@ def build_default_registry() -> ProviderRegistry:
             ProviderCapabilities(search=True, fetch=True),
             TinyFishAdapter,
             frozenset({"search_api_url", "fetch_api_url"}),
+        ),
+        WebProviderRegistration(
+            "parallel",
+            ProviderCapabilities(search=True, fetch=True),
+            ParallelAdapter,
+            frozenset(
+                {"api_url", "mode", "search_fetch_policy", "extract_fetch_policy"}
+            ),
         ),
     )
     for registration in registrations:
