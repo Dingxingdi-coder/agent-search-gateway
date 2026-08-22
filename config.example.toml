@@ -44,6 +44,23 @@ search_api_url = "https://api.tinyfish.ai/search"
 fetch_api_url = "https://api.tinyfish.ai/fetch"
 api_key_env = "TINYFISH_API_KEY"
 
+[web_providers.parallel]
+enable_search = true
+enable_fetch = true
+api_url = "https://api.parallel.ai"
+api_key_env = "PARALLEL_API_KEY"
+mode = "turbo"
+
+[web_providers.parallel.search_fetch_policy]
+max_age_seconds = 3600
+timeout_seconds = 15
+disable_cache_fallback = false
+
+[web_providers.parallel.extract_fetch_policy]
+max_age_seconds = 600
+timeout_seconds = 30
+disable_cache_fallback = true
+
 [llm_providers]
 default_max_concurrency = 2
 

@@ -3,6 +3,7 @@ import pytest
 from agent_search_gateway.config import resolve_web_provider_config
 from agent_search_gateway.errors import ConfigFailure, ErrorCode
 from agent_search_gateway.providers.contracts import ProviderCapabilities
+from agent_search_gateway.providers.defaults import build_default_registry
 from agent_search_gateway.providers.registry import ProviderRegistry, WebProviderRegistration
 
 
@@ -17,7 +18,9 @@ def _registry() -> ProviderRegistry:
             name="dual",
             capabilities=ProviderCapabilities(search=True, fetch=True),
             factory=_factory,
-            allowed_config_keys=frozenset({"api_url", "mode"}),
+            allowed_config_keys=frozenset(
+                {"api_url", "mode", "search_fetch_policy", "extract_fetch_policy"}
+            ),
         )
     )
     registry.register(
@@ -42,6 +45,11 @@ def test_resolve_web_provider_config_or_fail_startup() -> None:
                 "max_concurrency": 5,
                 "api_url": "https://api.example.test",
                 "mode": "fast",
+                "search_fetch_policy": {"max_age_seconds": 3600},
+                "extract_fetch_policy": {
+                    "timeout_seconds": 30,
+                    "disable_cache_fallback": True,
+                },
             },
             "search_only": {
                 "enable_search": False,
@@ -65,7 +73,16 @@ def test_resolve_web_provider_config_or_fail_startup() -> None:
     assert dict(dual.options) == {
         "api_url": "https://api.example.test",
         "mode": "fast",
+        "search_fetch_policy": {"max_age_seconds": 3600},
+        "extract_fetch_policy": {
+            "timeout_seconds": 30,
+            "disable_cache_fallback": True,
+        },
     }
+    assert "enable_search" not in dual.options
+    assert "enable_fetch" not in dual.options
+    assert "api_key_env" not in dual.options
+    assert "max_concurrency" not in dual.options
 
     disabled = resolved.providers[1]
     assert disabled.name == "search_only"
@@ -99,4 +116,48 @@ def test_resolve_web_provider_config_rejects_invalid_enabled_provider(
     data = {"web_providers": {"default_max_concurrency": 3, provider_name: provider_data}}
     with pytest.raises(ConfigFailure) as caught:
         resolve_web_provider_config(data, _registry(), environment)
+    assert caught.value.code is ErrorCode.CONFIG_ERROR
+
+
+def test_disabled_parallel_requires_no_credential_and_preserves_allowed_options() -> None:
+    data = {
+        "web_providers": {
+            "parallel": {
+                "enable_search": False,
+                "enable_fetch": False,
+                "api_url": "https://parallel.example.test",
+                "mode": "invalid-but-unused",
+                "search_fetch_policy": {"max_age_seconds": 1},
+                "extract_fetch_policy": {"unknown_nested": True},
+            }
+        }
+    }
+
+    resolved = resolve_web_provider_config(data, build_default_registry(), {})
+
+    [parallel] = resolved.providers
+    assert parallel.name == "parallel"
+    assert parallel.secret is None
+    assert dict(parallel.options) == {
+        "api_url": "https://parallel.example.test",
+        "mode": "invalid-but-unused",
+        "search_fetch_policy": {"max_age_seconds": 1},
+        "extract_fetch_policy": {"unknown_nested": True},
+    }
+
+
+def test_disabled_parallel_still_rejects_unknown_top_level_option() -> None:
+    data = {
+        "web_providers": {
+            "parallel": {
+                "enable_search": False,
+                "enable_fetch": False,
+                "unknown": True,
+            }
+        }
+    }
+
+    with pytest.raises(ConfigFailure) as caught:
+        resolve_web_provider_config(data, build_default_registry(), {})
+
     assert caught.value.code is ErrorCode.CONFIG_ERROR

@@ -44,6 +44,24 @@ def test_example_config_loads_with_stub_secrets_and_readme_commands_match_cli_he
         if configured.enable_fetch:
             assert registration.capabilities.fetch
 
+    parallel = next(item for item in resolved.web.providers if item.name == "parallel")
+    assert parallel.enable_search is True
+    assert parallel.enable_fetch is True
+    assert dict(parallel.options) == {
+        "api_url": "https://api.parallel.ai",
+        "mode": "turbo",
+        "search_fetch_policy": {
+            "max_age_seconds": 3600,
+            "timeout_seconds": 15,
+            "disable_cache_fallback": False,
+        },
+        "extract_fetch_policy": {
+            "max_age_seconds": 600,
+            "timeout_seconds": 30,
+            "disable_cache_fallback": True,
+        },
+    }
+
     readme = readme_path.read_text(encoding="utf-8")
     documented = set(
         re.findall(
