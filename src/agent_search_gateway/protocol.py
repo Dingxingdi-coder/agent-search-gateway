@@ -12,6 +12,7 @@ from .models import (
     ErrorResponse,
     KeywordSearchRequest,
     LLMSearchRequest,
+    PaperSearchRequest,
     Request,
     Response,
     ShutdownRequest,
@@ -44,12 +45,29 @@ def _parse_keyword(payload: Mapping[str, object]) -> Request:
     return KeywordSearchRequest(query)
 
 
+def _parse_paper(payload: Mapping[str, object]) -> Request:
+    _require_exact_keys(payload, {"type", "query"})
+    query = payload["query"]
+    if not isinstance(query, str):
+        raise ValueError("query must be a string")
+    return PaperSearchRequest(query)
+
+
 def _parse_llm(payload: Mapping[str, object]) -> Request:
-    _require_exact_keys(payload, {"type", "prompt"})
+    keys = set(payload)
+    if keys not in ({"type", "prompt"}, {"type", "prompt", "scope"}):
+        raise ValueError("request fields do not match schema")
     prompt = payload["prompt"]
     if not isinstance(prompt, str):
         raise ValueError("prompt must be a string")
-    return LLMSearchRequest(prompt)
+    scope = payload.get("scope", "web")
+    if scope == "web":
+        return LLMSearchRequest(prompt, "web")
+    if scope == "paper":
+        return LLMSearchRequest(prompt, "paper")
+    if scope == "all":
+        return LLMSearchRequest(prompt, "all")
+    raise ValueError("scope must be web, paper, or all")
 
 
 def _parse_fetch(payload: Mapping[str, object]) -> Request:
@@ -70,6 +88,7 @@ def _parse_shutdown(payload: Mapping[str, object]) -> Request:
 
 _REQUEST_PARSERS: dict[str, RequestParser] = {
     "keyword_search": _parse_keyword,
+    "paper_search": _parse_paper,
     "llm_search": _parse_llm,
     "url_fetch": _parse_fetch,
     "shutdown": _parse_shutdown,
@@ -141,8 +160,13 @@ class NDJSONDecoder:
 def _request_payload(request: Request) -> dict[str, object]:
     if isinstance(request, KeywordSearchRequest):
         return {"type": "keyword_search", "query": request.query}
+    if isinstance(request, PaperSearchRequest):
+        return {"type": "paper_search", "query": request.query}
     if isinstance(request, LLMSearchRequest):
-        return {"type": "llm_search", "prompt": request.prompt}
+        payload: dict[str, object] = {"type": "llm_search", "prompt": request.prompt}
+        if request.scope != "web":
+            payload["scope"] = request.scope
+        return payload
     if isinstance(request, URLFetchRequest):
         return {"type": "url_fetch", "url": request.url, "focus": request.focus}
     return {"type": "shutdown"}

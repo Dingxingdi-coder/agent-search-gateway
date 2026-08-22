@@ -1,0 +1,19 @@
+{
+  "doi": "10.1000/unpaywall.example",
+  "is_oa": true,
+  "oa_status": "gold",
+  "best_oa_location": {
+    "url": "https://repository.example/article",
+    "url_for_landing_page": "https://repository.example/article",
+    "url_for_pdf": "https://repository.example/article.pdf",
+    "license": "cc-by"
+  },
+  "oa_locations": [
+    {
+      "url": "https://alternate.example/article",
+      "url_for_landing_page": "https://alternate.example/article",
+      "url_for_pdf": "https://alternate.example/article.pdf",
+      "license": "cc-by-nc"
+    }
+  ]
+}

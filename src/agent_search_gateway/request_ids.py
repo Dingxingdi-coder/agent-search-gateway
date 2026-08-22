@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Literal
 
 RequestIdFactory = Callable[[], str]
-ResultKind = Literal["keyword", "llm"]
+ResultKind = Literal["keyword", "llm", "paper"]
 
-_RESULT_KINDS: tuple[ResultKind, ...] = ("keyword", "llm")
+_RESULT_KINDS: tuple[ResultKind, ...] = ("keyword", "llm", "paper")
 _REQUEST_ID_PATTERN = re.compile(r"[0-9a-f]{8}")
 _REQUEST_ID: ContextVar[str | None] = ContextVar("agent_search_gateway_request_id", default=None)
 

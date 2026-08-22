@@ -6,6 +6,10 @@ import pytest
 from agent_search_gateway.config import resolve_config
 from agent_search_gateway.errors import ConfigFailure
 from agent_search_gateway.paths import RuntimePaths
+from agent_search_gateway.providers.academic.defaults import (
+    build_default_academic_registry,
+    build_default_oa_resolver_registry,
+)
 from agent_search_gateway.providers.contracts import ProviderCapabilities
 from agent_search_gateway.providers.defaults import build_default_registry
 from agent_search_gateway.providers.registry import WebProviderRegistration
@@ -262,3 +266,81 @@ def test_runtime_rejects_reserved_web_adapter_kwargs(
 
     with pytest.raises(ConfigFailure, match="Reserved config key"):
         Runtime.build(resolved, RuntimePaths.from_home(tmp_path), registry=registry)
+
+
+async def test_runtime_assembles_all_academic_providers_resolver_and_closes_once(
+    tmp_path: Path,
+) -> None:
+    web_registry = build_default_registry()
+    academic_registry = build_default_academic_registry()
+    resolver_registry = build_default_oa_resolver_registry()
+    raw = _config()
+    raw["academic_providers"] = {
+        "default_max_concurrency": 2,
+        "arxiv": {"enabled": True},
+        "semantic_scholar": {"enabled": True},
+        "openalex": {"enabled": True},
+        "dblp": {"enabled": True},
+        "crossref": {"enabled": True},
+        "core": {
+            "enabled": True,
+            "api_key_env": "CORE_API_KEY",
+            "max_concurrency": 4,
+        },
+    }
+    raw["oa_resolvers"] = {
+        "unpaywall": {"enabled": True, "contact_email_env": "OA_CONTACT"}
+    }
+    environment = {
+        "ENV_A": "x",
+        "ENV_B": "x",
+        "ENV_C": "x",
+        "ENV_D": "x",
+        "ENV_E": "x",
+        "ENV_F": "x",
+        "CORE_API_KEY": "x",
+        "OA_CONTACT": "[REDACTED_SECRET]",
+    }
+    resolved = resolve_config(
+        raw,
+        web_registry,
+        environment,
+        academic_registry=academic_registry,
+        oa_resolver_registry=resolver_registry,
+    )
+    clients: list[_CountingAsyncClient] = []
+
+    def client_factory() -> httpx.AsyncClient:
+        client = _CountingAsyncClient()
+        clients.append(client)
+        return client
+
+    runtime = Runtime.build(
+        resolved,
+        RuntimePaths.from_home(tmp_path),
+        registry=web_registry,
+        academic_registry=academic_registry,
+        oa_resolver_registry=resolver_registry,
+        http_client_factory=client_factory,
+    )
+    assert [provider.name for provider in runtime.academic_search_providers] == [
+        "arxiv",
+        "semantic_scholar",
+        "openalex",
+        "dblp",
+        "crossref",
+        "core",
+    ]
+    assert runtime.oa_resolver is not None
+    assert runtime.oa_resolver.name == "unpaywall"
+    assert runtime.paper_search_orchestrator.providers == runtime.academic_search_providers
+    assert runtime.paper_search_orchestrator.resolver is runtime.oa_resolver
+    assert runtime.paper_search_orchestrator.store is runtime.store
+    assert runtime.quotas.get_academic("arxiv").limit == 2
+    assert runtime.quotas.get_academic("core").limit == 4
+    assert "[REDACTED_SECRET]" not in repr(runtime)
+
+    await runtime.aclose()
+    await runtime.aclose()
+    assert len(clients) == 13
+    assert all(client.close_calls == 1 for client in clients)

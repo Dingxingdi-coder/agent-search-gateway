@@ -3,10 +3,11 @@
 from collections.abc import Mapping, Sequence
 
 from agent_search_gateway.errors import ExecutionFailure
-from agent_search_gateway.models import LLMInvocation
+from agent_search_gateway.models import LLMInvocation, OAResolution
 from agent_search_gateway.providers.contracts import (
     ChatMessage,
     KeywordSearchHit,
+    PaperSearchHit,
     URLFetchCandidate,
 )
 from agent_search_gateway.url_normalization import NormalizedURL
@@ -29,6 +30,44 @@ class FakeKeywordSearchProvider:
         if self.failure is not None:
             raise self.failure
         return list(self.result)
+
+
+class FakeAcademicSearchProvider:
+    def __init__(
+        self,
+        name: str,
+        result: Sequence[PaperSearchHit] = (),
+        failure: ExecutionFailure | None = None,
+    ) -> None:
+        self.name = name
+        self.result = list(result)
+        self.failure = failure
+        self.calls: list[str] = []
+
+    async def search(self, query: str) -> list[PaperSearchHit]:
+        self.calls.append(query)
+        if self.failure is not None:
+            raise self.failure
+        return list(self.result)
+
+
+class FakeOAResolver:
+    name = "unpaywall"
+
+    def __init__(
+        self,
+        result: OAResolution | None = None,
+        failure: ExecutionFailure | None = None,
+    ) -> None:
+        self.result = result
+        self.failure = failure
+        self.calls: list[str] = []
+
+    async def resolve(self, doi: str) -> OAResolution | None:
+        self.calls.append(doi)
+        if self.failure is not None:
+            raise self.failure
+        return self.result
 
 
 class FakeURLFetchProvider:

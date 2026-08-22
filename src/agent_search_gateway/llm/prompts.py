@@ -70,3 +70,37 @@ def llm_search_messages(prompt: str) -> tuple[ChatMessage, ...]:
         },
         {"role": "user", "content": prompt.strip()},
     )
+
+
+def llm_paper_search_messages(prompt: str) -> tuple[ChatMessage, ...]:
+    return (
+        {
+            "role": "system",
+            "content": (
+                "Find relevant academic papers. Return only repeated blocks in exactly this "
+                "16-line restricted format, with every field present exactly once and in this "
+                "order. "
+                "Optional values may be empty. Authors and Topics are semicolon-separated. "
+                "Dates are empty or YYYY-MM-DD. Citations are empty or a non-negative integer. "
+                "Open Access is true, false, or unknown. Do not use Markdown links, Result blocks, "
+                "or any text outside these blocks:\n"
+                "## Paper\n"
+                "Title: paper title\n"
+                "Authors: Alice Author; Bob Author\n"
+                "Abstract: concise abstract\n"
+                "DOI: 10.1000/example\n"
+                "arXiv: 2401.12345\n"
+                "Published: 2024-01-02\n"
+                "Updated: 2024-02-03\n"
+                "URL: https://example.com/paper\n"
+                "PDF: https://example.com/paper.pdf\n"
+                "Venue: venue name\n"
+                "Topics: topic one; topic two\n"
+                "Citations: 0\n"
+                "Open Access: unknown\n"
+                "OA Status: \n"
+                "License: "
+            ),
+        },
+        {"role": "user", "content": prompt.strip()},
+    )

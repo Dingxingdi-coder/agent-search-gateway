@@ -12,6 +12,7 @@ from agent_search_gateway.models import (
     ErrorResponse,
     KeywordSearchRequest,
     LLMSearchRequest,
+    PaperSearchRequest,
     SuccessResponse,
     URLFetchRequest,
 )
@@ -27,8 +28,19 @@ class _FakeSearch:
             raise RuntimeError("sensitive unexpected detail")
         return f"keyword:{query}"
 
-    async def llm_search(self, prompt: str, *, request_id: str) -> str:
-        return f"llm:{prompt}"
+    async def llm_search(
+        self,
+        prompt: str,
+        *,
+        request_id: str,
+        scope: str = "web",
+    ) -> str:
+        return f"llm:{prompt}" if scope == "web" else f"llm:{scope}:{prompt}"
+
+
+class _FakePaper:
+    async def paper_search(self, query: str, *, request_id: str) -> str:
+        return f"paper:{query}:{request_id}"
 
 
 class _FakeFetch:
@@ -39,6 +51,7 @@ class _FakeFetch:
 class _FakeRuntime:
     def __init__(self) -> None:
         self.search_orchestrator = _FakeSearch()
+        self.paper_search_orchestrator = _FakePaper()
         self.fetch_orchestrator = _FakeFetch()
         self.close_calls = 0
 
@@ -65,6 +78,10 @@ async def test_daemon_loads_runtime_binds_socket_and_dispatches_typed_requests(
     assert await send_request(paths.socket_file, LLMSearchRequest("find")) == SuccessResponse(
         "llm:find"
     )
+    paper_response = await send_request(paths.socket_file, PaperSearchRequest("papers"))
+    assert isinstance(paper_response, SuccessResponse)
+    assert paper_response.text.startswith("paper:papers:")
+    assert len(paper_response.text.rsplit(":", 1)[1]) == 8
     assert await send_request(
         paths.socket_file,
         URLFetchRequest("https://example.com", "topic"),

@@ -14,6 +14,7 @@ from .prompts import (
     content_clean_messages,
     focus_summary_messages,
     judge_messages,
+    llm_paper_search_messages,
     llm_search_messages,
     safety_messages,
 )
@@ -101,6 +102,21 @@ class LLMStages:
             operation=lambda: self._client(invocation.provider).complete_text(
                 invocation,
                 llm_search_messages(prompt),
+            ),
+        )
+
+    async def llm_paper_search_markdown(
+        self,
+        invocation: LLMInvocation,
+        prompt: str,
+    ) -> str:
+        return await self._run_text_stage(
+            invocation,
+            "llm_paper_search",
+            input_chars=len(prompt),
+            operation=lambda: self._client(invocation.provider).complete_text(
+                invocation,
+                llm_paper_search_messages(prompt),
             ),
         )
 

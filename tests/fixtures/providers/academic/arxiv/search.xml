@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <entry>
+    <id>https://arxiv.org/abs/2401.12345v2</id>
+    <updated>2024-02-03T12:00:00Z</updated>
+    <published>2024-01-02T10:00:00Z</published>
+    <title>  Example   arXiv Paper  </title>
+    <summary>Example abstract.</summary>
+    <author><name>Alice Example</name></author>
+    <author><name>Bob Example</name></author>
+    <arxiv:doi>10.1000/ARXIV.EXAMPLE</arxiv:doi>
+    <category term="cs.AI" />
+    <category term="cs.LG" />
+    <link href="https://arxiv.org/abs/2401.12345v2" rel="alternate" type="text/html" />
+    <link href="https://arxiv.org/pdf/2401.12345v2.pdf" rel="related" type="application/pdf" title="pdf" />
+  </entry>
+  <entry>
+    <id>https://arxiv.org/abs/2401.99999v1</id>
+    <published>2024-01-01T00:00:00Z</published>
+  </entry>
+</feed>

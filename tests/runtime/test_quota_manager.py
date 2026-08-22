@@ -126,3 +126,30 @@ async def test_quota_debug_events_cover_acquire_wait_try_release_and_cancellatio
     async with direct.lease():
         assert direct.in_use == 1
     assert direct.in_use == 0
+
+
+async def test_academic_capacity_is_separate_and_logs_academic_quota_kind() -> None:
+    logger, stream = structured_test_logger("tests.quota.academic")
+    quotas = ProviderQuotaManager(
+        web_limits={"shared": 1},
+        llm_limits={"shared": 1},
+        academic_limits={"shared": 2},
+        logger=logger,
+    )
+    academic_gate = quotas.get_academic("shared")
+    assert academic_gate.limit == 2
+    async with academic_gate.lease():
+        assert academic_gate.in_use == 1
+        assert quotas.get_web("shared").in_use == 0
+        assert quotas.get_llm("shared").in_use == 0
+    assert "quota_kind=academic" in stream.getvalue()
+
+
+def test_omitted_academic_limits_preserve_existing_constructor_behavior() -> None:
+    quotas = ProviderQuotaManager(web_limits={}, llm_limits={})
+    try:
+        quotas.get_academic("missing")
+    except KeyError:
+        pass
+    else:
+        raise AssertionError("missing academic quota must not be synthesized")

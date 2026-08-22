@@ -10,7 +10,9 @@ class RecordedRequest:
     url: str
     stage: str
     headers: Mapping[str, str] | None
+    params: Mapping[str, object] | None
     json_body: object | None
+    response_mode: str
 
 
 class RecordingJsonExecutor:
@@ -25,9 +27,36 @@ class RecordingJsonExecutor:
         *,
         stage: str,
         headers: Mapping[str, str] | None = None,
+        params: Mapping[str, object] | None = None,
         json_body: object | None = None,
     ) -> object:
-        self.requests.append(RecordedRequest(method, url, stage, headers, json_body))
+        self.requests.append(
+            RecordedRequest(method, url, stage, headers, params, json_body, "json")
+        )
+        return self._pop_response()
+
+    async def request_text(
+        self,
+        method: str,
+        url: str,
+        *,
+        stage: str,
+        headers: Mapping[str, str] | None = None,
+        params: Mapping[str, object] | None = None,
+        json_body: object | None = None,
+    ) -> str:
+        self.requests.append(
+            RecordedRequest(method, url, stage, headers, params, json_body, "text")
+        )
+        response = self._pop_response()
+        if not isinstance(response, str):
+            raise AssertionError("expected text response")
+        return response
+
+    def _pop_response(self) -> object:
         if not self._responses:
             raise AssertionError("unexpected HTTP request")
-        return self._responses.pop(0)
+        response = self._responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        return response

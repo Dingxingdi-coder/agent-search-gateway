@@ -2,9 +2,10 @@
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date
 from typing import Protocol, runtime_checkable
 
-from ..models import LLMInvocation
+from ..models import LLMInvocation, OAResolution
 from ..url_normalization import NormalizedURL
 
 ChatMessage = Mapping[str, str]
@@ -26,6 +27,27 @@ class URLFetchCandidate:
 
 
 @dataclass(frozen=True, slots=True)
+class PaperSearchHit:
+    source: str
+    source_id: str
+    title: str
+    authors: tuple[str, ...] = ()
+    abstract: str = ""
+    doi: str = ""
+    arxiv_id: str = ""
+    published_date: date | None = None
+    updated_date: date | None = None
+    url: str = ""
+    pdf_url: str = ""
+    venue: str = ""
+    topics: tuple[str, ...] = ()
+    citation_count: int | None = None
+    is_open_access: bool | None = None
+    oa_status: str = ""
+    license: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderCapabilities:
     search: bool
     fetch: bool
@@ -43,6 +65,20 @@ class URLFetchProvider(Protocol):
     name: str
 
     async def fetch(self, url: NormalizedURL) -> URLFetchCandidate: ...
+
+
+@runtime_checkable
+class AcademicSearchProvider(Protocol):
+    name: str
+
+    async def search(self, query: str) -> list[PaperSearchHit]: ...
+
+
+@runtime_checkable
+class OAResolver(Protocol):
+    name: str
+
+    async def resolve(self, doi: str) -> OAResolution | None: ...
 
 
 @runtime_checkable

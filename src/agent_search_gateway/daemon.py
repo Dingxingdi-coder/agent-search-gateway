@@ -16,6 +16,8 @@ from .models import (
     ErrorResponse,
     KeywordSearchRequest,
     LLMSearchRequest,
+    LLMSearchScope,
+    PaperSearchRequest,
     Request,
     Response,
     ShutdownRequest,
@@ -25,6 +27,10 @@ from .models import (
 from .observability import DebugLoggingSession, elapsed_ms, log_event
 from .paths import RuntimePaths
 from .protocol import NDJSONDecoder, encode_response
+from .providers.academic.defaults import (
+    build_default_academic_registry,
+    build_default_oa_resolver_registry,
+)
 from .providers.defaults import build_default_registry
 from .request_ids import RequestIdFactory, RequestIdRegistry, bind_request_id, generate_request_id
 from .runtime import Runtime
@@ -37,7 +43,17 @@ _SOCKET_PROBE_TIMEOUT_SECONDS = 2.0
 class _SearchOrchestratorLike(Protocol):
     async def keyword_search(self, query: str, *, request_id: str) -> str: ...
 
-    async def llm_search(self, prompt: str, *, request_id: str) -> str: ...
+    async def llm_search(
+        self,
+        prompt: str,
+        *,
+        request_id: str,
+        scope: LLMSearchScope = "web",
+    ) -> str: ...
+
+
+class _PaperSearchOrchestratorLike(Protocol):
+    async def paper_search(self, query: str, *, request_id: str) -> str: ...
 
 
 class _FetchOrchestratorLike(Protocol):
@@ -47,6 +63,9 @@ class _FetchOrchestratorLike(Protocol):
 class RuntimeLike(Protocol):
     @property
     def search_orchestrator(self) -> _SearchOrchestratorLike: ...
+
+    @property
+    def paper_search_orchestrator(self) -> _PaperSearchOrchestratorLike: ...
 
     @property
     def fetch_orchestrator(self) -> _FetchOrchestratorLike: ...
@@ -71,10 +90,12 @@ async def _default_shutdown_waiter(
 
 
 def _command_name(
-    request: KeywordSearchRequest | LLMSearchRequest | URLFetchRequest,
+    request: KeywordSearchRequest | PaperSearchRequest | LLMSearchRequest | URLFetchRequest,
 ) -> str:
     if isinstance(request, KeywordSearchRequest):
         return "keyword-search"
+    if isinstance(request, PaperSearchRequest):
+        return "paper-search"
     if isinstance(request, LLMSearchRequest):
         return "llm-search"
     return "url-fetch"
@@ -211,8 +232,16 @@ class ForegroundDaemon:
             if self._runtime_factory is not None:
                 return self._runtime_factory()
             registry = build_default_registry()
+            academic_registry = build_default_academic_registry()
+            resolver_registry = build_default_oa_resolver_registry()
             data = load_toml(self.paths.config_file)
-            config = resolve_config(data, registry, self._environ)
+            config = resolve_config(
+                data,
+                registry,
+                self._environ,
+                academic_registry=academic_registry,
+                oa_resolver_registry=resolver_registry,
+            )
             if self._logging_session is not None:
                 web_secrets = (
                     provider.secret
@@ -220,8 +249,32 @@ class ForegroundDaemon:
                     if provider.secret is not None
                 )
                 llm_secrets = (provider.secret for provider in config.llm.providers)
-                self._logging_session.add_secrets(web_secrets, llm_secrets)
-            return Runtime.build(config, self.paths, registry=registry)
+                academic_secrets = (
+                    secret
+                    for provider in config.academic.providers
+                    for secret in (provider.api_key, provider.contact_email)
+                    if secret is not None
+                )
+                resolver_secrets = (
+                    secret
+                    for resolver in (config.oa_resolver,)
+                    if resolver is not None
+                    for secret in (resolver.api_key, resolver.contact_email)
+                    if secret is not None
+                )
+                self._logging_session.add_secrets(
+                    web_secrets,
+                    llm_secrets,
+                    academic_secrets,
+                    resolver_secrets,
+                )
+            return Runtime.build(
+                config,
+                self.paths,
+                registry=registry,
+                academic_registry=academic_registry,
+                oa_resolver_registry=resolver_registry,
+            )
         except ConfigFailure:
             raise
         except Exception as exc:
@@ -267,10 +320,16 @@ class ForegroundDaemon:
             await self._begin_shutdown()
             await self._shutdown_response_ready.wait()
             return SuccessResponse("Daemon stopped.")
-        if not isinstance(request, (KeywordSearchRequest, LLMSearchRequest, URLFetchRequest)):
+        if not isinstance(
+            request,
+            (KeywordSearchRequest, PaperSearchRequest, LLMSearchRequest, URLFetchRequest),
+        ):
             return ErrorResponse(ErrorCode.BAD_REQUEST, "Unknown request type")
 
-        is_search = isinstance(request, (KeywordSearchRequest, LLMSearchRequest))
+        is_search = isinstance(
+            request,
+            (KeywordSearchRequest, PaperSearchRequest, LLMSearchRequest),
+        )
         with (
             self._request_ids.reserve(may_write_search_result=is_search) as request_id,
             bind_request_id(request_id),
@@ -279,7 +338,7 @@ class ForegroundDaemon:
 
     async def _dispatch_business(
         self,
-        request: KeywordSearchRequest | LLMSearchRequest | URLFetchRequest,
+        request: KeywordSearchRequest | PaperSearchRequest | LLMSearchRequest | URLFetchRequest,
         *,
         request_id: str,
     ) -> Response:
@@ -345,7 +404,7 @@ class ForegroundDaemon:
 
     async def _invoke_workflow(
         self,
-        request: KeywordSearchRequest | LLMSearchRequest | URLFetchRequest,
+        request: KeywordSearchRequest | PaperSearchRequest | LLMSearchRequest | URLFetchRequest,
         *,
         request_id: str,
     ) -> str:
@@ -355,10 +414,16 @@ class ForegroundDaemon:
                 request.query,
                 request_id=request_id,
             )
+        if isinstance(request, PaperSearchRequest):
+            return await runtime.paper_search_orchestrator.paper_search(
+                request.query,
+                request_id=request_id,
+            )
         if isinstance(request, LLMSearchRequest):
             return await runtime.search_orchestrator.llm_search(
                 request.prompt,
                 request_id=request_id,
+                scope=request.scope,
             )
         return await runtime.fetch_orchestrator.url_fetch(request.url, request.focus)
 

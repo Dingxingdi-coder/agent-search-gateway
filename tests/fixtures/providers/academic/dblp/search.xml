@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<result>
+  <hits total="2" sent="2">
+    <hit id="1">
+      <info key="conf/example/Author24">
+        <authors>
+          <author pid="a/Alice">Alice Example</author>
+          <author pid="b/Bob">Bob Example</author>
+        </authors>
+        <title>A <i>Structured</i> DBLP Paper</title>
+        <venue>ExampleConf</venue>
+        <year>2024</year>
+        <url>https://dblp.org/rec/conf/example/Author24</url>
+        <ee>https://doi.org/10.1000/DBLP.EXAMPLE</ee>
+      </info>
+    </hit>
+    <hit id="2"><info><title>Missing stable identity</title></info></hit>
+  </hits>
+</result>

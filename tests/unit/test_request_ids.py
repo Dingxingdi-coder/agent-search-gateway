@@ -89,11 +89,12 @@ def test_registry_rejects_active_collision_and_releases_for_reuse(tmp_path: Path
 def test_search_reservation_rejects_existing_result_files(tmp_path: Path) -> None:
     (tmp_path / "keyword-33333333.jsonl").write_text("", encoding="utf-8")
     (tmp_path / "llm-44444444.jsonl").write_text("", encoding="utf-8")
-    values = iter(["33333333", "44444444", "55555555"])
+    (tmp_path / "paper-55555555.jsonl").write_text("", encoding="utf-8")
+    values = iter(["33333333", "44444444", "55555555", "66666666"])
     registry = RequestIdRegistry(tmp_path, factory=values.__next__)
 
     with registry.reserve(may_write_search_result=True) as request_id:
-        assert request_id == "55555555"
+        assert request_id == "66666666"
 
 
 def test_fetch_reservation_ignores_existing_result_files(tmp_path: Path) -> None:
@@ -136,6 +137,7 @@ def test_registry_wraps_exhausted_factory(tmp_path: Path) -> None:
 def test_result_filename_is_exact_and_validated() -> None:
     assert result_filename("keyword", "a1b2c3d4") == "keyword-a1b2c3d4.jsonl"
     assert result_filename("llm", "11111111") == "llm-11111111.jsonl"
+    assert result_filename("paper", "22222222") == "paper-22222222.jsonl"
 
     with pytest.raises(ValueError, match="result kind"):
         result_filename("other", "11111111")  # type: ignore[arg-type]

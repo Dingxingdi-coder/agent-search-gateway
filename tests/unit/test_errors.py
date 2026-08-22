@@ -18,6 +18,7 @@ def test_error_contract_contains_exact_codes_and_unavailable_message() -> None:
         "no_keyword_search_providers",
         "no_llm_search_providers",
         "no_url_fetch_providers",
+        "no_academic_search_providers",
         "all_providers_failed",
         "llm_stage_failed",
         "protocol_error",

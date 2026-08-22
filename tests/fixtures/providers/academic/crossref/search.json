@@ -1,0 +1,30 @@
+{
+  "message": {
+    "items": [
+      {
+        "DOI": "10.1000/CROSSREF.EXAMPLE",
+        "title": ["Crossref Example"],
+        "author": [
+          {"given": "Alice", "family": "Example"},
+          {"family": "Consortium"}
+        ],
+        "abstract": "<jats:p>A <jats:bold>structured</jats:bold> abstract.</jats:p>",
+        "container-title": ["Example Journal"],
+        "published-print": {"date-parts": [[2023, 11, 9]]},
+        "is-referenced-by-count": 42,
+        "URL": "https://publisher.example/crossref",
+        "link": [
+          {"URL": "https://publisher.example/crossref.pdf", "content-type": "application/pdf"}
+        ]
+      },
+      {
+        "DOI": "10.1000/NO.DATE",
+        "title": ["No Date Paper"],
+        "author": [],
+        "container-title": [],
+        "link": []
+      },
+      {"title": ["Malformed without DOI"]}
+    ]
+  }
+}
