@@ -7,7 +7,7 @@ import pytest
 from agent_search_gateway.errors import ErrorCode, ExecutionFailure, ProtocolFailure
 from agent_search_gateway.models import RetryPolicy
 from agent_search_gateway.observability import KeyValueFormatter, SecretRedactor, SecretValue
-from agent_search_gateway.providers.http import HttpJsonExecutor
+from agent_search_gateway.providers.http import HttpJsonExecutor, HttpStatusFailure
 from tests.support.logging import structured_test_logger
 
 
@@ -336,6 +336,40 @@ async def test_http_executor_maps_non_retryable_http_error_to_execution_failure(
     assert "status=401" in logged
     assert "elapsed_ms=" in logged
     assert "do-not-log-response-body" not in logged
+
+
+async def test_http_executor_classifies_redirect_as_status_failure_before_json_decode() -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(302, text="REDIRECT_BODY_SENTINEL", request=request)
+
+    logger, stream = structured_test_logger("tests.http.redirect-status")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        executor = HttpJsonExecutor(
+            client,
+            RetryPolicy(3, 0.01, 0.02, 1.0),
+            provider_name="fake",
+            logger=logger,
+            sleep=_no_sleep,
+        )
+        with pytest.raises(HttpStatusFailure) as caught:
+            await executor.request_json(
+                "GET",
+                "https://provider.example.test/data",
+                stage="fetch",
+            )
+
+    assert attempts == 1
+    assert caught.value.status_code == 302
+    logged = stream.getvalue()
+    assert "event=http_failed" in logged
+    assert "category=status" in logged
+    assert "status=302" in logged
+    assert "category=decode" not in logged
+    assert "REDIRECT_BODY_SENTINEL" not in logged
 
 
 async def test_http_executor_terminal_transport_failure_includes_elapsed_time() -> None:

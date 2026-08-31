@@ -62,6 +62,28 @@ async def test_semantic_scholar_invalid_envelope_is_protocol_failure() -> None:
     with pytest.raises(ProtocolFailure) as caught:
         await SemanticScholarProvider(executor).search("query")
     assert caught.value.code is ErrorCode.PROTOCOL_ERROR
+    assert caught.value.reason == "invalid_data_envelope"
+
+
+@pytest.mark.parametrize(
+    ("payload", "reason"),
+    [
+        ({}, "missing_data_envelope"),
+        ({"error": "RAW_PROVIDER_DETAIL_SENTINEL"}, "missing_data_envelope"),
+        ({"data": None}, "invalid_data_envelope"),
+        ([], "invalid_data_envelope"),
+    ],
+)
+async def test_semantic_scholar_classifies_unexpected_success_envelopes(
+    payload: object,
+    reason: str,
+) -> None:
+    with pytest.raises(ProtocolFailure) as caught:
+        await SemanticScholarProvider(RecordingJsonExecutor([payload])).search("query")
+
+    assert caught.value.reason == reason
+    assert reason in caught.value.message
+    assert "RAW_PROVIDER_DETAIL_SENTINEL" not in caught.value.message
 
 
 async def test_semantic_scholar_auth_failure_has_no_unauthenticated_fallback() -> None:

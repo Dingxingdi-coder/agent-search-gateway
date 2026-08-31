@@ -42,10 +42,12 @@ def protocol_failure(
     detail: str,
     *,
     stage: str = "paper_search",
+    reason: str | None = None,
 ) -> ProtocolFailure:
     return ProtocolFailure(
         ErrorCode.PROTOCOL_ERROR,
         f"{provider}/{stage}: {detail}",
+        reason=reason,
     )
 
 

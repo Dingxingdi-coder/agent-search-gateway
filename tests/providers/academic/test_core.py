@@ -41,7 +41,7 @@ async def test_core_maps_works_with_required_bearer_auth() -> None:
 
     request = executor.requests[0]
     assert request.method == "GET"
-    assert request.url == "https://api.core.ac.uk/v3/search/works"
+    assert request.url == "https://api.core.ac.uk/v3/search/works/"
     assert request.headers == {"Authorization": "Bearer [REDACTED_SECRET]"}
     assert request.params == {"q": "repositories", "limit": 10, "offset": 0}
 

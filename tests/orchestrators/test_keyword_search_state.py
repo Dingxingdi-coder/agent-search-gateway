@@ -2,6 +2,7 @@ import asyncio
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import cast
 
 from agent_search_gateway.concurrency import ProviderQuotaManager
 from agent_search_gateway.errors import ErrorCode, ExecutionFailure
@@ -147,6 +148,10 @@ async def test_keyword_search_validates_body_then_commits_deterministic_first_wr
                 snippet="Explodes judge",
                 raw_content="explode-body",
             ),
+            KeywordSearchHit(
+                "https://example.com/d",
+                snippet="D survives judge failure",
+            ),
         ],
     )
     providers = [first_provider, second_provider, failed_provider]
@@ -170,6 +175,8 @@ async def test_keyword_search_validates_body_then_commits_deterministic_first_wr
         {"url": "https://example.com/reject", "abstract": "Rejected body still admitted"},
         {"url": "https://example.com/unavailable", "abstract": "Stored unavailable"},
         {"url": "https://example.com/b", "abstract": "B abstract"},
+        {"url": "https://example.com/c", "abstract": "C would be staged"},
+        {"url": "https://example.com/d", "abstract": "D survives judge failure"},
     ]
 
     a = store.get(normalize_url("https://example.com/a"))
@@ -180,12 +187,111 @@ async def test_keyword_search_validates_body_then_commits_deterministic_first_wr
     rejected = store.get(normalize_url("https://example.com/reject"))
     assert rejected is not None and rejected.raw_content == "" and rejected.available is True
     assert store.get(normalize_url("https://example.com/skip")) is None
-    assert store.get(normalize_url("https://example.com/c")) is None
+    staged_before_failure = store.get(normalize_url("https://example.com/c"))
+    assert staged_before_failure is not None
+    assert staged_before_failure.abstract == "C would be staged"
+    staged_after_failure = store.get(normalize_url("https://example.com/d"))
+    assert staged_after_failure is not None
+    assert staged_after_failure.abstract == "D survives judge failure"
     assert "explode-body-unavailable-must-be-skipped" not in "\n".join(judge_client.candidates)
 
     second_path = Path(await orchestrator.keyword_search("query", request_id="22222222"))
     assert second_path != first_path
     assert [provider.calls for provider in providers] == [2, 2, 2]
+
+
+async def test_keyword_search_attributes_hit_staging_failures_without_duplicate_terminal_events(
+    tmp_path: Path,
+) -> None:
+    logger, stream = structured_test_logger("tests.search.keyword-hit-staging-failures")
+    judge_client = _JudgeClient()
+    invocation = LLMInvocation("judge", "judge-model", {})
+    stages = LLMStages(
+        {"judge": judge_client},
+        judge=invocation,
+        safety=invocation,
+        content_clean=invocation,
+        focus_summary=invocation,
+        logger=logger,
+    )
+    partial = FakeKeywordSearchProvider(
+        "partial",
+        [
+            KeywordSearchHit("https://example.com/kept", snippet="Kept result"),
+            KeywordSearchHit(
+                "https://example.com/partial-failure",
+                snippet="Judge fails",
+                raw_content="explode-body-partial",
+            ),
+        ],
+    )
+    all_judge_failed = FakeKeywordSearchProvider(
+        "all-judge-failed",
+        [
+            KeywordSearchHit(
+                "https://example.com/all-failed",
+                snippet="Judge fails",
+                raw_content="explode-body-all",
+            )
+        ],
+    )
+    invalid_hit = FakeKeywordSearchProvider(
+        "invalid-hit",
+        [KeywordSearchHit(cast(str, 1), snippet="Invalid hit")],
+    )
+    orchestrator = SearchOrchestrator(
+        keyword_providers=[partial, all_judge_failed, invalid_hit],
+        llm_invocations=(),
+        quotas=ProviderQuotaManager(
+            web_limits={"partial": 1, "all-judge-failed": 1, "invalid-hit": 1},
+            llm_limits={},
+        ),
+        stages=stages,
+        store=URLStore(),
+        result_writer=ResultWriter(tmp_path / "judge-failure-results"),
+        logger=logger,
+    )
+
+    await orchestrator.keyword_search("query", request_id="1234abcd")
+
+    lines = stream.getvalue().splitlines()
+    partial_lines = [line for line in lines if "provider=partial" in line]
+    assert sum("event=provider_partial_failure" in line for line in partial_lines) == 1
+    assert any(
+        "event=provider_partial_failure" in line
+        and "stage=judge" in line
+        and "error_type=ExecutionFailure" in line
+        and "failed_hits=1" in line
+        for line in partial_lines
+    )
+    assert sum("event=provider_completed" in line for line in partial_lines) == 1
+    assert not any("event=provider_failed" in line for line in partial_lines)
+
+    failed_lines = [line for line in lines if "provider=all-judge-failed" in line]
+    assert sum("event=provider_failed" in line for line in failed_lines) == 1
+    assert any(
+        "event=provider_failed" in line
+        and "stage=judge" in line
+        and "error_type=ExecutionFailure" in line
+        for line in failed_lines
+    )
+    assert not any(
+        "event=provider_failed" in line and "stage=search" in line for line in failed_lines
+    )
+    assert not any("event=provider_completed" in line for line in failed_lines)
+
+    invalid_lines = [line for line in lines if "provider=invalid-hit" in line]
+    assert sum("event=provider_failed" in line for line in invalid_lines) == 1
+    assert any(
+        "event=provider_failed" in line
+        and "stage=hit_staging" in line
+        and "error_type=TypeError" in line
+        for line in invalid_lines
+    )
+    assert not any(
+        "event=provider_failed" in line and "stage=search" in line for line in invalid_lines
+    )
+    assert not any("event=provider_completed" in line for line in invalid_lines)
 
 
 async def test_keyword_search_debug_events_cover_provider_candidate_body_and_persistence(

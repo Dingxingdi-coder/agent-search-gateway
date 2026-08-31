@@ -210,7 +210,7 @@ class HttpJsonExecutor:
             self._log_failed(stage, log_endpoint, attempt, attempt_started, "transport")
             raise self._execution_failure(stage, "HTTP transport failure") from exc
 
-        if response.status_code >= 400:
+        if response.status_code < 200 or response.status_code >= 300:
             self._log_failed(
                 stage,
                 log_endpoint,

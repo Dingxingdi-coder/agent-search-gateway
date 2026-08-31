@@ -46,9 +46,16 @@ class SemanticScholarProvider:
             params={"query": query, "limit": 10, "fields": _FIELDS},
         )
         envelope = as_mapping(payload)
-        data = as_list(envelope.get("data")) if envelope is not None else None
+        if envelope is None:
+            reason = "invalid_data_envelope"
+            raise protocol_failure(self.name, reason, reason=reason)
+        if "data" not in envelope:
+            reason = "missing_data_envelope"
+            raise protocol_failure(self.name, reason, reason=reason)
+        data = as_list(envelope.get("data"))
         if data is None:
-            raise protocol_failure(self.name, "response data envelope was invalid")
+            reason = "invalid_data_envelope"
+            raise protocol_failure(self.name, reason, reason=reason)
         hits: list[PaperSearchHit] = []
         for item in data:
             mapped = self._map_item(item)

@@ -1,5 +1,7 @@
 from collections.abc import Mapping, Sequence
 
+import pytest
+
 from agent_search_gateway.concurrency import ProviderQuotaManager
 from agent_search_gateway.errors import ErrorCode, ExecutionFailure
 from agent_search_gateway.llm.stages import LLMStages
@@ -96,10 +98,10 @@ async def test_fetch_scheduler_classifies_execution_semantic_and_accepted_outcom
         URLFetchCandidate(raw_content="judge-execution"),
     )
     later_success = FakeURLFetchProvider("later", URLFetchCandidate(raw_content="later-success"))
-    recovered = await _scheduler([judge_execution, later_success]).fetch_until_accepted(url)
-    assert recovered.kind == "accepted"
-    assert recovered.candidate == URLFetchCandidate("later-success")
-    assert len(recovered.failures) == 1
+    with pytest.raises(ExecutionFailure) as caught:
+        await _scheduler([judge_execution, later_success]).fetch_until_accepted(url)
+    assert caught.value.message == "judge failed"
+    assert later_success.calls == []
 
     mixed = await _scheduler(
         [
@@ -116,6 +118,42 @@ async def test_fetch_scheduler_classifies_execution_semantic_and_accepted_outcom
     stopped = await _scheduler([first_success, never_called]).fetch_until_accepted(url)
     assert stopped.kind == "accepted"
     assert never_called.calls == []
+
+
+async def test_fetch_scheduler_attributes_judge_dependency_failure_and_stops_fallback() -> None:
+    logger, stream = structured_test_logger("tests.fetch.judge-failure")
+    invocation = LLMInvocation("judge", "judge-model", {})
+    stages = LLMStages(
+        {"judge": _JudgeClient()},
+        judge=invocation,
+        safety=invocation,
+        content_clean=invocation,
+        focus_summary=invocation,
+        logger=logger,
+    )
+    failed_judge = FakeURLFetchProvider(
+        "first",
+        URLFetchCandidate(raw_content="judge-execution"),
+    )
+    later = FakeURLFetchProvider("later", URLFetchCandidate(raw_content="later-success"))
+    scheduler = FetchScheduler(
+        [failed_judge, later],
+        ProviderQuotaManager(web_limits={"first": 1, "later": 1}, llm_limits={}),
+        stages,
+        logger=logger,
+    )
+
+    with pytest.raises(ExecutionFailure):
+        await scheduler.fetch_until_accepted(normalize_url("https://example.com"))
+
+    assert later.calls == []
+    assert any(
+        "event=provider_failed" in line
+        and "provider=first" in line
+        and "failed_stage=judge" in line
+        and "dependency=judge" in line
+        for line in stream.getvalue().splitlines()
+    )
 
 
 async def test_fetch_scheduler_debug_events_cover_fallback_semantics_and_acceptance() -> None:
