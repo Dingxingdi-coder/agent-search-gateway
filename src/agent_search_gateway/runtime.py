@@ -218,12 +218,20 @@ class Runtime:
         executors: list[HttpJsonExecutor] = []
         for provider_config in providers:
             registration = registry.get(provider_config.name)
-            private_value = provider_config.secret
-            if registration is None or private_value is None:
+            if registration is None:
                 raise ConfigFailure(
                     ErrorCode.CONFIG_ERROR,
                     f"Invalid enabled web provider: {provider_config.name}",
                 )
+            credential_kwargs: dict[str, object] = {}
+            if registration.requires_api_key:
+                private_value = provider_config.secret
+                if private_value is None:
+                    raise ConfigFailure(
+                        ErrorCode.CONFIG_ERROR,
+                        f"Invalid enabled web provider: {provider_config.name}",
+                    )
+                credential_kwargs["secret"] = private_value
             reserved = set(provider_config.options) & _RESERVED_WEB_ADAPTER_KWARGS
             if reserved:
                 names = ", ".join(sorted(reserved))
@@ -239,8 +247,8 @@ class Runtime:
             kwargs: dict[str, object] = {
                 "name": provider_config.name,
                 "http_executor": executor,
-                "secret": private_value,
             }
+            kwargs.update(credential_kwargs)
             kwargs.update(provider_config.options)
             try:
                 adapter = registration.factory(**kwargs)

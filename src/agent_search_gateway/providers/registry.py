@@ -16,6 +16,7 @@ class WebProviderRegistration:
     capabilities: ProviderCapabilities
     factory: WebProviderFactory
     allowed_config_keys: frozenset[str]
+    requires_api_key: bool = True
 
 
 class ProviderRegistry:

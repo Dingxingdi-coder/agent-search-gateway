@@ -117,6 +117,11 @@ enable_fetch = false
 api_url = "https://serpapi.com"
 api_key_env = "SERP_API_KEY"
 
+[web_providers.jina]
+enable_search = false
+enable_fetch = true
+api_url = "https://r.jina.ai"
+
 [academic_providers]
 default_max_concurrency = 3
 
