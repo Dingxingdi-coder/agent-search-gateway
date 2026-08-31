@@ -135,6 +135,7 @@ def test_example_config_and_readme_document_all_new_provider_contracts() -> None
         "scraperapi",
         "scrapingant",
         "serpapi",
+        "jina",
     }
     assert new_names <= set(web)
     assert "apify" not in web
@@ -158,6 +159,7 @@ def test_example_config_and_readme_document_all_new_provider_contracts() -> None
         "scraperapi": (True, True),
         "scrapingant": (False, True),
         "serpapi": (True, False),
+        "jina": (False, True),
     }
     for name, (search, fetch) in expected_capabilities.items():
         configured = by_name[name]
@@ -169,11 +171,29 @@ def test_example_config_and_readme_document_all_new_provider_contracts() -> None
             registration.capabilities.fetch,
         ) == (search, fetch)
 
-    for name in new_names:
+    credentialless_names = {"jina"}
+    credentialed_names = new_names - credentialless_names
+    for name in credentialed_names:
         raw = web[name]
         assert isinstance(raw, dict)
         api_key_env = raw.get("api_key_env")
-        assert api_key_env == "[REDACTED]"
+        assert isinstance(api_key_env, str)
+        assert api_key_env.strip()
+        registration = registry.require(name)
+        assert registration.requires_api_key is True
+        configured = by_name[name]
+        assert configured.api_key_env == api_key_env
+        assert configured.secret is not None
+
+    jina_raw = web["jina"]
+    assert isinstance(jina_raw, dict)
+    assert "api_key_env" not in jina_raw
+    jina_registration = registry.require("jina")
+    assert jina_registration.requires_api_key is False
+    jina = by_name["jina"]
+    assert jina.api_key_env is None
+    assert jina.secret is None
+    assert dict(jina.options) == {"api_url": "https://r.jina.ai"}
 
     readme = (_ROOT / "README.md").read_text(encoding="utf-8")
     expected_rows = {
@@ -186,7 +206,12 @@ def test_example_config_and_readme_document_all_new_provider_contracts() -> None
         "ScraperAPI": ("yes", "yes"),
         "ScrapingAnt": ("no", "yes"),
         "SerpApi": ("yes", "no"),
+        "Jina Reader": ("no", "yes"),
     }
     for display_name, (search_label, fetch_label) in expected_rows.items():
         assert f"| {display_name} | {search_label} | {fetch_label} |" in readme
+    assert "Only providers that require credentials use `api_key_env`" in readme
+    assert "Each actual Jina Reader request sends `X-No-Cache: true`" in readme
+    assert "does not bypass content already prepared by the gateway" in readme
+    assert "no force-refresh option" in readme
     assert "| Apify |" not in readme

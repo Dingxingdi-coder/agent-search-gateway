@@ -90,6 +90,50 @@ def test_resolve_web_provider_config_or_fail_startup() -> None:
     assert disabled.secret is None
 
 
+def test_jina_resolves_without_credential() -> None:
+    data = {
+        "web_providers": {
+            "default_max_concurrency": 3,
+            "jina": {
+                "enable_search": False,
+                "enable_fetch": True,
+                "max_concurrency": 5,
+                "api_url": "https://reader.example.test",
+            },
+        }
+    }
+
+    resolved = resolve_web_provider_config(data, build_default_registry(), {})
+
+    [jina] = resolved.providers
+    assert jina.name == "jina"
+    assert jina.enable_search is False
+    assert jina.enable_fetch is True
+    assert jina.max_concurrency == 5
+    assert jina.api_key_env is None
+    assert jina.secret is None
+    assert dict(jina.options) == {"api_url": "https://reader.example.test"}
+
+
+def test_jina_rejects_api_key_env() -> None:
+    data = {
+        "web_providers": {
+            "jina": {
+                "enable_search": False,
+                "enable_fetch": True,
+                "api_key_env": "[REDACTED_SECRET]",
+                "api_url": "https://reader.example.test",
+            }
+        }
+    }
+
+    with pytest.raises(ConfigFailure) as caught:
+        resolve_web_provider_config(data, build_default_registry(), {})
+
+    assert caught.value.code is ErrorCode.CONFIG_ERROR
+    assert "web provider jina does not accept api_key_env" in str(caught.value)
+
+
 @pytest.mark.parametrize(
     ("provider_name", "provider_data", "environment"),
     [
@@ -169,6 +213,7 @@ def test_disabled_parallel_still_rejects_unknown_top_level_option() -> None:
         ("zenrows", "enable_search"),
         ("scrapingant", "enable_search"),
         ("serpapi", "enable_fetch"),
+        ("jina", "enable_search"),
     ],
 )
 def test_new_provider_capabilities_are_enforced_by_generic_config_resolution(
@@ -189,6 +234,8 @@ def test_new_provider_capabilities_are_enforced_by_generic_config_resolution(
         resolve_web_provider_config(data, build_default_registry(), {"KEY": "secret"})
 
     assert caught.value.code is ErrorCode.CONFIG_ERROR
+    unsupported_stage = unsupported_flag.removeprefix("enable_")
+    assert f"does not support {unsupported_stage}" in str(caught.value)
 
 
 def test_new_provider_allowed_options_flow_through_generic_resolution() -> None:

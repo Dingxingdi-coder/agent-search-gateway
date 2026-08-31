@@ -12,7 +12,7 @@ Install the CLI from the current source checkout with `uv tool`. This creates an
 uv tool install .
 ```
 
-Create `~/.config/agent-search-gateway-cli/config.toml` from `config.example.toml`, adjust the enabled providers, and export the environment variables named by each provider's `api_key_env`. The configuration stores environment-variable names only; credential values remain in the daemon process environment.
+Create `~/.config/agent-search-gateway-cli/config.toml` from `config.example.toml` and adjust the enabled providers. Only providers that require credentials use `api_key_env`; export the environment variables named by those entries. The configuration stores environment-variable names only; credential values remain in the daemon process environment.
 
 After configuration, run the local health check before starting the foreground daemon:
 
@@ -68,8 +68,11 @@ The results directory is created by the daemon as needed. The debug log is creat
 | ScraperAPI | yes | yes |
 | ScrapingAnt | no | yes |
 | SerpApi | yes | no |
+| Jina Reader | no | yes |
 
 Parallel accepts optional Search mode `turbo`, `fast`, `basic`, or `advanced`, plus independent Search and Extract fetch policies. Extract always requests full content internally, while Search result count is left to Parallel's provider default. When enabling Parallel, set `api_key_env` to the name of the environment variable that holds the credential.
+
+Jina Reader is a credential-free, fetch-only provider, so its configuration must omit `api_key_env`. Each actual Jina Reader request sends `X-No-Cache: true` to refresh Reader-side content. This does not bypass content already prepared by the gateway: an admitted URL whose body is already prepared still short-circuits before provider dispatch, and the gateway exposes no force-refresh option. Configuration order remains fetch-provider priority, so place Jina earlier when free-first behavior is desired.
 
 Web search and fetch stages for the same provider share one concurrency quota. LLM provider transports have their own independent quotas.
 
