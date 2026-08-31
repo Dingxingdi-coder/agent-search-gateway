@@ -7,6 +7,7 @@ from agent_search_gateway.providers.defaults import build_default_registry
 from agent_search_gateway.providers.registry import ProviderRegistry, WebProviderRegistration
 from agent_search_gateway.providers.web.brightdata import BrightDataAdapter
 from agent_search_gateway.providers.web.decodo import DecodoAdapter
+from agent_search_gateway.providers.web.jina import JinaReaderAdapter
 from agent_search_gateway.providers.web.scrape_do import ScrapeDoAdapter
 from agent_search_gateway.providers.web.scrapegraphai import ScrapeGraphAIAdapter
 from agent_search_gateway.providers.web.scraperapi import ScraperAPIAdapter
@@ -19,6 +20,17 @@ from tests.support.fakes import FakeKeywordSearchProvider, FakeURLFetchProvider
 
 def _factory() -> object:
     return object()
+
+
+def test_web_provider_registration_requires_api_key_by_default() -> None:
+    registration = WebProviderRegistration(
+        "custom",
+        ProviderCapabilities(search=True, fetch=False),
+        _factory,
+        frozenset({"api_url"}),
+    )
+
+    assert registration.requires_api_key is True
 
 
 def test_registry_exposes_exact_capabilities_and_contract_types() -> None:
@@ -69,7 +81,7 @@ def test_registry_exposes_exact_capabilities_and_contract_types() -> None:
 
 def test_default_registry_appends_new_providers_with_exact_contracts() -> None:
     registry = build_default_registry()
-    registrations = registry.list_in_registration_order()[-9:]
+    registrations = registry.list_in_registration_order()[-10:]
 
     expected = [
         (
@@ -101,9 +113,26 @@ def test_default_registry_appends_new_providers_with_exact_contracts() -> None:
             frozenset({"api_url"}),
         ),
         ("serpapi", ProviderCapabilities(True, False), SerpApiAdapter, frozenset({"api_url"})),
+        ("jina", ProviderCapabilities(False, True), JinaReaderAdapter, frozenset({"api_url"})),
     ]
 
     assert [
         (item.name, item.capabilities, item.factory, item.allowed_config_keys)
         for item in registrations
     ] == expected
+
+
+def test_default_registry_marks_only_jina_credentialless() -> None:
+    registry = build_default_registry()
+
+    jina = registry.require("jina")
+    assert jina.name == "jina"
+    assert jina.capabilities == ProviderCapabilities(search=False, fetch=True)
+    assert jina.factory is JinaReaderAdapter
+    assert jina.allowed_config_keys == frozenset({"api_url"})
+    assert jina.requires_api_key is False
+    assert {
+        item.name
+        for item in registry.list_in_registration_order()
+        if not item.requires_api_key
+    } == {"jina"}

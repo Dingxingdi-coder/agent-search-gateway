@@ -116,6 +116,19 @@ def _resolve_one_web_provider(
     if enable_fetch and not registration.capabilities.fetch:
         raise _config_error(f"web provider {name} does not support fetch")
 
+    if not registration.requires_api_key:
+        if "api_key_env" in table:
+            raise _config_error(f"web provider {name} does not accept api_key_env")
+        return ResolvedWebProviderConfig(
+            name=name,
+            enable_search=enable_search,
+            enable_fetch=enable_fetch,
+            max_concurrency=max_concurrency,
+            api_key_env=None,
+            secret=None,
+            options=MappingProxyType(dict(options)),
+        )
+
     api_key_env = table.get("api_key_env")
     if not isinstance(api_key_env, str) or not api_key_env.strip():
         raise _config_error(f"web provider {name} requires api_key_env")

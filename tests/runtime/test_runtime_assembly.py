@@ -12,8 +12,10 @@ from agent_search_gateway.providers.academic.defaults import (
 )
 from agent_search_gateway.providers.contracts import ProviderCapabilities
 from agent_search_gateway.providers.defaults import build_default_registry
+from agent_search_gateway.providers.http import HttpJsonExecutor
 from agent_search_gateway.providers.registry import WebProviderRegistration
 from agent_search_gateway.providers.web.brightdata import BrightDataAdapter
+from agent_search_gateway.providers.web.jina import JinaReaderAdapter
 from agent_search_gateway.providers.web.parallel import ParallelAdapter
 from agent_search_gateway.runtime import Runtime
 from tests.support.logging import structured_test_logger
@@ -139,6 +141,7 @@ async def test_runtime_assembly_builds_enabled_adapters_with_shared_quotas_and_c
         ("scraperapi", True, True),
         ("scrapingant", False, True),
         ("serpapi", True, False),
+        ("jina", False, True),
     ]
     parallel_registration = registry.get("parallel")
     assert parallel_registration is not None
@@ -210,6 +213,52 @@ async def test_runtime_assembly_builds_enabled_adapters_with_shared_quotas_and_c
     brave["enable_fetch"] = True
     with pytest.raises(ConfigFailure):
         resolve_config(bad, registry, environment)
+
+
+async def test_runtime_assembles_credentialless_jina_fetch_provider(
+    tmp_path: Path,
+) -> None:
+    registry = build_default_registry()
+    raw = _config()
+    raw["web_providers"] = {
+        "default_max_concurrency": 3,
+        "jina": {
+            "enable_search": False,
+            "enable_fetch": True,
+            "api_url": "https://reader.example.test/",
+            "max_concurrency": 5,
+        },
+    }
+    resolved = resolve_config(raw, registry, _environment())
+    [jina_config] = resolved.web.providers
+    assert jina_config.secret is None
+    clients: list[_CountingAsyncClient] = []
+
+    def client_factory() -> httpx.AsyncClient:
+        client = _CountingAsyncClient()
+        clients.append(client)
+        return client
+
+    runtime = Runtime.build(
+        resolved,
+        RuntimePaths.from_home(tmp_path),
+        registry=registry,
+        http_client_factory=client_factory,
+    )
+
+    assert runtime.web_search_providers == ()
+    [provider] = runtime.web_fetch_providers
+    assert isinstance(provider, JinaReaderAdapter)
+    assert provider.name == "jina"
+    assert provider._api_url == "https://reader.example.test"
+    assert runtime.quotas.get_web("jina").limit == 5
+    [executor] = runtime._web_http_executors
+    assert isinstance(executor, HttpJsonExecutor)
+    assert executor._client is clients[0]
+
+    await runtime.aclose()
+    assert len(clients) == 3
+    assert all(client.close_calls == 1 for client in clients)
 
 
 async def test_runtime_assembles_brightdata_with_one_shared_dual_adapter(

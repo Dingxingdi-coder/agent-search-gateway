@@ -8,6 +8,7 @@ from .web.brightdata import BrightDataAdapter
 from .web.decodo import DecodoAdapter
 from .web.exa import ExaAdapter
 from .web.firecrawl import FirecrawlAdapter
+from .web.jina import JinaReaderAdapter
 from .web.linkup import LinkupAdapter
 from .web.parallel import ParallelAdapter
 from .web.scrape_do import ScrapeDoAdapter
@@ -127,6 +128,13 @@ def build_default_registry() -> ProviderRegistry:
             ProviderCapabilities(search=True, fetch=False),
             SerpApiAdapter,
             frozenset({"api_url"}),
+        ),
+        WebProviderRegistration(
+            "jina",
+            ProviderCapabilities(search=False, fetch=True),
+            JinaReaderAdapter,
+            frozenset({"api_url"}),
+            requires_api_key=False,
         ),
     )
     for registration in registrations:
