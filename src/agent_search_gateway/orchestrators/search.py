@@ -360,22 +360,6 @@ class SearchOrchestrator:
                 hits = await provider.search(query)
             if not isinstance(hits, list):
                 raise TypeError("provider search result must be a list")
-            staged: list[_StagedKeyword] = []
-            hit_failure: ExecutionFailure | None = None
-            for hit in hits:
-                try:
-                    staged_hit = await self._stage_keyword_hit(hit, provider=provider.name)
-                except ExecutionFailure as exc:
-                    # Keyword hits are independent; one failed judge must not discard sibling hits.
-                    if hit_failure is None:
-                        hit_failure = exc
-                    continue
-                if staged_hit is not None:
-                    staged.append(staged_hit)
-            if not staged and hit_failure is not None:
-                raise hit_failure
-            if hit_failure is not None:
-                self._log_provider_failure(provider.name, "judge", started, hit_failure)
         except asyncio.CancelledError:
             raise
         except ExecutionFailure as exc:
@@ -387,6 +371,42 @@ class SearchOrchestrator:
                 ErrorCode.ALL_PROVIDERS_FAILED,
                 f"Keyword provider {provider.name} returned invalid data",
             ) from exc
+
+        staged: list[_StagedKeyword] = []
+        hit_failure: ExecutionFailure | None = None
+        failed_hits = 0
+        try:
+            for hit in hits:
+                try:
+                    staged_hit = await self._stage_keyword_hit(hit, provider=provider.name)
+                except ExecutionFailure as exc:
+                    # Keyword hits are independent; one failed judge must not discard sibling hits.
+                    if hit_failure is None:
+                        hit_failure = exc
+                    failed_hits += 1
+                    continue
+                if staged_hit is not None:
+                    staged.append(staged_hit)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._log_provider_failure(provider.name, "search", started, exc)
+            raise ExecutionFailure(
+                ErrorCode.ALL_PROVIDERS_FAILED,
+                f"Keyword provider {provider.name} returned invalid data",
+            ) from exc
+
+        if hit_failure is not None:
+            if not staged:
+                self._log_provider_failure(provider.name, "judge", started, hit_failure)
+                raise hit_failure
+            self._log_provider_partial_failure(
+                provider.name,
+                "judge",
+                started,
+                hit_failure,
+                failed_hits=failed_hits,
+            )
         log_event(
             self._logger,
             logging.DEBUG,
@@ -504,6 +524,26 @@ class SearchOrchestrator:
             provider=provider,
             stage=stage,
             error_type=type(exc).__name__,
+            elapsed_ms=elapsed_ms(self._monotonic, started),
+        )
+
+    def _log_provider_partial_failure(
+        self,
+        provider: str,
+        stage: str,
+        started: float,
+        exc: Exception,
+        *,
+        failed_hits: int,
+    ) -> None:
+        log_event(
+            self._logger,
+            logging.DEBUG,
+            "provider_partial_failure",
+            provider=provider,
+            stage=stage,
+            error_type=type(exc).__name__,
+            failed_hits=failed_hits,
             elapsed_ms=elapsed_ms(self._monotonic, started),
         )
 

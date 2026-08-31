@@ -199,6 +199,83 @@ async def test_keyword_search_validates_body_then_commits_deterministic_first_wr
     assert [provider.calls for provider in providers] == [2, 2, 2]
 
 
+async def test_keyword_search_attributes_judge_failures_without_duplicate_terminal_events(
+    tmp_path: Path,
+) -> None:
+    logger, stream = structured_test_logger("tests.search.keyword-judge-failures")
+    judge_client = _JudgeClient()
+    invocation = LLMInvocation("judge", "judge-model", {})
+    stages = LLMStages(
+        {"judge": judge_client},
+        judge=invocation,
+        safety=invocation,
+        content_clean=invocation,
+        focus_summary=invocation,
+        logger=logger,
+    )
+    partial = FakeKeywordSearchProvider(
+        "partial",
+        [
+            KeywordSearchHit("https://example.com/kept", snippet="Kept result"),
+            KeywordSearchHit(
+                "https://example.com/partial-failure",
+                snippet="Judge fails",
+                raw_content="explode-body-partial",
+            ),
+        ],
+    )
+    all_judge_failed = FakeKeywordSearchProvider(
+        "all-judge-failed",
+        [
+            KeywordSearchHit(
+                "https://example.com/all-failed",
+                snippet="Judge fails",
+                raw_content="explode-body-all",
+            )
+        ],
+    )
+    orchestrator = SearchOrchestrator(
+        keyword_providers=[partial, all_judge_failed],
+        llm_invocations=(),
+        quotas=ProviderQuotaManager(
+            web_limits={"partial": 1, "all-judge-failed": 1},
+            llm_limits={},
+        ),
+        stages=stages,
+        store=URLStore(),
+        result_writer=ResultWriter(tmp_path / "judge-failure-results"),
+        logger=logger,
+    )
+
+    await orchestrator.keyword_search("query", request_id="1234abcd")
+
+    lines = stream.getvalue().splitlines()
+    partial_lines = [line for line in lines if "provider=partial" in line]
+    assert sum("event=provider_partial_failure" in line for line in partial_lines) == 1
+    assert any(
+        "event=provider_partial_failure" in line
+        and "stage=judge" in line
+        and "error_type=ExecutionFailure" in line
+        and "failed_hits=1" in line
+        for line in partial_lines
+    )
+    assert sum("event=provider_completed" in line for line in partial_lines) == 1
+    assert not any("event=provider_failed" in line for line in partial_lines)
+
+    failed_lines = [line for line in lines if "provider=all-judge-failed" in line]
+    assert sum("event=provider_failed" in line for line in failed_lines) == 1
+    assert any(
+        "event=provider_failed" in line
+        and "stage=judge" in line
+        and "error_type=ExecutionFailure" in line
+        for line in failed_lines
+    )
+    assert not any(
+        "event=provider_failed" in line and "stage=search" in line for line in failed_lines
+    )
+    assert not any("event=provider_completed" in line for line in failed_lines)
+
+
 async def test_keyword_search_debug_events_cover_provider_candidate_body_and_persistence(
     tmp_path: Path,
 ) -> None:
