@@ -390,7 +390,7 @@ class SearchOrchestrator:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self._log_provider_failure(provider.name, "search", started, exc)
+            self._log_provider_failure(provider.name, "hit_staging", started, exc)
             raise ExecutionFailure(
                 ErrorCode.ALL_PROVIDERS_FAILED,
                 f"Keyword provider {provider.name} returned invalid data",

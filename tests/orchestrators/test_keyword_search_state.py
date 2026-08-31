@@ -2,6 +2,7 @@ import asyncio
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import cast
 
 from agent_search_gateway.concurrency import ProviderQuotaManager
 from agent_search_gateway.errors import ErrorCode, ExecutionFailure
@@ -199,10 +200,10 @@ async def test_keyword_search_validates_body_then_commits_deterministic_first_wr
     assert [provider.calls for provider in providers] == [2, 2, 2]
 
 
-async def test_keyword_search_attributes_judge_failures_without_duplicate_terminal_events(
+async def test_keyword_search_attributes_hit_staging_failures_without_duplicate_terminal_events(
     tmp_path: Path,
 ) -> None:
-    logger, stream = structured_test_logger("tests.search.keyword-judge-failures")
+    logger, stream = structured_test_logger("tests.search.keyword-hit-staging-failures")
     judge_client = _JudgeClient()
     invocation = LLMInvocation("judge", "judge-model", {})
     stages = LLMStages(
@@ -234,11 +235,15 @@ async def test_keyword_search_attributes_judge_failures_without_duplicate_termin
             )
         ],
     )
+    invalid_hit = FakeKeywordSearchProvider(
+        "invalid-hit",
+        [KeywordSearchHit(cast(str, 1), snippet="Invalid hit")],
+    )
     orchestrator = SearchOrchestrator(
-        keyword_providers=[partial, all_judge_failed],
+        keyword_providers=[partial, all_judge_failed, invalid_hit],
         llm_invocations=(),
         quotas=ProviderQuotaManager(
-            web_limits={"partial": 1, "all-judge-failed": 1},
+            web_limits={"partial": 1, "all-judge-failed": 1, "invalid-hit": 1},
             llm_limits={},
         ),
         stages=stages,
@@ -274,6 +279,19 @@ async def test_keyword_search_attributes_judge_failures_without_duplicate_termin
         "event=provider_failed" in line and "stage=search" in line for line in failed_lines
     )
     assert not any("event=provider_completed" in line for line in failed_lines)
+
+    invalid_lines = [line for line in lines if "provider=invalid-hit" in line]
+    assert sum("event=provider_failed" in line for line in invalid_lines) == 1
+    assert any(
+        "event=provider_failed" in line
+        and "stage=hit_staging" in line
+        and "error_type=TypeError" in line
+        for line in invalid_lines
+    )
+    assert not any(
+        "event=provider_failed" in line and "stage=search" in line for line in invalid_lines
+    )
+    assert not any("event=provider_completed" in line for line in invalid_lines)
 
 
 async def test_keyword_search_debug_events_cover_provider_candidate_body_and_persistence(
