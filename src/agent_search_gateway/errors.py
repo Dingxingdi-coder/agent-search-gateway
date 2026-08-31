@@ -27,10 +27,17 @@ UNAVAILABLE_MESSAGE = (
 class GatewayError(Exception):
     """Base typed failure crossing orchestration boundaries."""
 
-    def __init__(self, code: ErrorCode, message: str) -> None:
+    def __init__(
+        self,
+        code: ErrorCode,
+        message: str,
+        *,
+        reason: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+        self.reason = reason
 
 
 class InputFailure(GatewayError):

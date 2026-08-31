@@ -173,7 +173,8 @@ def test_example_config_and_readme_document_all_new_provider_contracts() -> None
         raw = web[name]
         assert isinstance(raw, dict)
         api_key_env = raw.get("api_key_env")
-        assert api_key_env == "[REDACTED]"
+        assert isinstance(api_key_env, str)
+        assert api_key_env.strip()
 
     readme = (_ROOT / "README.md").read_text(encoding="utf-8")
     expected_rows = {

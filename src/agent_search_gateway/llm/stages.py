@@ -46,6 +46,10 @@ class LLMStages:
         self._logger = logger or logging.getLogger(__name__)
         self._monotonic = monotonic
 
+    @property
+    def judge_provider(self) -> str:
+        return self._judge.provider
+
     async def judge(self, candidate: str) -> StageDecision:
         return await self._run_decision_stage(
             self._judge,

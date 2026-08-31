@@ -1,5 +1,6 @@
 """Linkup search and fetch adapter."""
 
+from ...errors import ExecutionFailure
 from ...observability import SecretValue
 from ...providers.contracts import KeywordSearchHit, URLFetchCandidate
 from ...url_normalization import NormalizedURL
@@ -44,16 +45,21 @@ class LinkupAdapter:
         results = require_list(root.get("results"), self.name, "search", "results")
         hits: list[KeywordSearchHit] = []
         for item in results:
-            result = require_object(item, self.name, "search", "result")
-            hits.append(
-                KeywordSearchHit(
-                    url=non_empty_string(result.get("url"), self.name, "search", "result.url"),
-                    title=non_empty_string(result.get("name"), self.name, "search", "result.name"),
-                    snippet=non_empty_string(
-                        result.get("content"), self.name, "search", "result.content"
-                    ),
+            try:
+                result = require_object(item, self.name, "search", "result")
+                hits.append(
+                    KeywordSearchHit(
+                        url=non_empty_string(result.get("url"), self.name, "search", "result.url"),
+                        title=non_empty_string(
+                            result.get("name"), self.name, "search", "result.name"
+                        ),
+                        snippet=non_empty_string(
+                            result.get("content"), self.name, "search", "result.content"
+                        ),
+                    )
                 )
-            )
+            except ExecutionFailure:
+                continue
         return hits
 
     async def fetch(self, url: NormalizedURL) -> URLFetchCandidate:

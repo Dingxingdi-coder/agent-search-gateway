@@ -361,10 +361,21 @@ class SearchOrchestrator:
             if not isinstance(hits, list):
                 raise TypeError("provider search result must be a list")
             staged: list[_StagedKeyword] = []
+            hit_failure: ExecutionFailure | None = None
             for hit in hits:
-                staged_hit = await self._stage_keyword_hit(hit, provider=provider.name)
+                try:
+                    staged_hit = await self._stage_keyword_hit(hit, provider=provider.name)
+                except ExecutionFailure as exc:
+                    # Keyword hits are independent; one failed judge must not discard sibling hits.
+                    if hit_failure is None:
+                        hit_failure = exc
+                    continue
                 if staged_hit is not None:
                     staged.append(staged_hit)
+            if not staged and hit_failure is not None:
+                raise hit_failure
+            if hit_failure is not None:
+                self._log_provider_failure(provider.name, "judge", started, hit_failure)
         except asyncio.CancelledError:
             raise
         except ExecutionFailure as exc:

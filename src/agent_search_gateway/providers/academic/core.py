@@ -37,7 +37,7 @@ class CoreProvider:
     async def search(self, query: str) -> list[PaperSearchHit]:
         payload = await self._executor.request_json(
             "GET",
-            join_url(self._api_url, "search/works"),
+            join_url(self._api_url, "search/works/"),
             stage="paper_search",
             headers=self._request_headers(),
             params={"q": query, "limit": 10, "offset": 0},

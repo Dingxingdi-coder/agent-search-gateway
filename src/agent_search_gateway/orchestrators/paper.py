@@ -152,6 +152,18 @@ class PaperSearchOrchestrator:
         started: float,
         exc: BaseException,
     ) -> None:
+        if isinstance(exc, ExecutionFailure) and exc.reason:
+            log_event(
+                self._logger,
+                logging.DEBUG,
+                "provider_failed",
+                provider=provider,
+                stage="paper_search",
+                error_type=type(exc).__name__,
+                elapsed_ms=elapsed_ms(self._monotonic, started),
+                reason=exc.reason,
+            )
+            return
         log_event(
             self._logger,
             logging.DEBUG,

@@ -45,10 +45,17 @@ def configured_string(value: object, label: str) -> str:
     return value.strip()
 
 
-def failure(provider: str, stage: str, reason: str) -> ExecutionFailure:
+def failure(
+    provider: str,
+    stage: str,
+    reason: str,
+    *,
+    reason_code: str | None = None,
+) -> ExecutionFailure:
     return ExecutionFailure(
         ErrorCode.ALL_PROVIDERS_FAILED,
         f"{provider}/{stage}: {reason}",
+        reason=reason_code,
     )
 
 

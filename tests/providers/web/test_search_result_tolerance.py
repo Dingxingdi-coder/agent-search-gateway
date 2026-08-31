@@ -12,6 +12,7 @@ from agent_search_gateway.providers.web.brightdata import BrightDataAdapter
 from agent_search_gateway.providers.web.decodo import DecodoAdapter
 from agent_search_gateway.providers.web.exa import ExaAdapter
 from agent_search_gateway.providers.web.firecrawl import FirecrawlAdapter
+from agent_search_gateway.providers.web.linkup import LinkupAdapter
 from agent_search_gateway.providers.web.scrape_do import ScrapeDoAdapter
 from agent_search_gateway.providers.web.scrapegraphai import ScrapeGraphAIAdapter
 from agent_search_gateway.providers.web.scraperapi import ScraperAPIAdapter
@@ -176,6 +177,53 @@ async def test_search_adapters_keep_valid_hits_when_presentation_fields_are_malf
     assert hits[0].url == "https://example.com/good"
     assert hits[0].title == ""
     assert hits[0].snippet == expected_snippet
+
+
+async def test_linkup_skips_only_isolated_malformed_search_results() -> None:
+    adapter = LinkupAdapter(
+        name="linkup",
+        api_url="https://linkup.example.test",
+        secret=SecretValue("x"),
+        http_executor=RecordingJsonExecutor(
+            [
+                {
+                    "results": [
+                        None,
+                        {
+                            "url": {},
+                            "name": "Bad URL",
+                            "content": "Bad URL",
+                        },
+                        {
+                            "url": "https://example.com/bad-name",
+                            "name": 1,
+                            "content": "Bad name",
+                        },
+                        {
+                            "url": "https://example.com/bad-content",
+                            "name": "Bad content",
+                            "content": [],
+                        },
+                        {
+                            "url": "https://example.com/good",
+                            "name": "Good",
+                            "content": "Useful snippet",
+                        },
+                    ]
+                }
+            ]
+        ),
+    )
+
+    hits = await adapter.search("query")
+
+    assert hits == [
+        KeywordSearchHit(
+            url="https://example.com/good",
+            title="Good",
+            snippet="Useful snippet",
+        )
+    ]
 
 
 def _brightdata(executor: RecordingHttpExecutor) -> _SearchAdapter:

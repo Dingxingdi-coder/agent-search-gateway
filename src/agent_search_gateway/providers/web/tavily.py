@@ -78,13 +78,26 @@ class TavilyAdapter:
             headers=self._headers,
             json_body={"urls": [str(url)]},
         )
-        root = require_object(payload, self.name, "fetch", "response")
-        results = require_list(root.get("results"), self.name, "fetch", "results")
+        try:
+            root = require_object(payload, self.name, "fetch", "response")
+            results = require_list(root.get("results"), self.name, "fetch", "results")
+        except ExecutionFailure as exc:
+            reason = "invalid_results_envelope"
+            raise failure(self.name, "fetch", reason, reason_code=reason) from exc
+
+        empty_match_seen = False
         for item in results:
-            result = require_object(item, self.name, "fetch", "result")
-            if normalized_match(result.get("url"), url, self.name, "fetch"):
-                raw = non_empty_string(
-                    result.get("raw_content"), self.name, "fetch", "result.raw_content"
-                )
-                return URLFetchCandidate(raw_content=raw)
-        raise failure(self.name, "fetch", "matching extraction result was not returned")
+            try:
+                result = require_object(item, self.name, "fetch", "result")
+                if not normalized_match(result.get("url"), url, self.name, "fetch"):
+                    continue
+            except ExecutionFailure:
+                continue
+            raw = result.get("raw_content")
+            if not isinstance(raw, str) or not raw.strip():
+                empty_match_seen = True
+                continue
+            return URLFetchCandidate(raw_content=raw)
+
+        reason = "empty_raw_content" if empty_match_seen else "no_matching_result"
+        raise failure(self.name, "fetch", reason, reason_code=reason)

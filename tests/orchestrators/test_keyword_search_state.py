@@ -147,6 +147,10 @@ async def test_keyword_search_validates_body_then_commits_deterministic_first_wr
                 snippet="Explodes judge",
                 raw_content="explode-body",
             ),
+            KeywordSearchHit(
+                "https://example.com/d",
+                snippet="D survives judge failure",
+            ),
         ],
     )
     providers = [first_provider, second_provider, failed_provider]
@@ -170,6 +174,8 @@ async def test_keyword_search_validates_body_then_commits_deterministic_first_wr
         {"url": "https://example.com/reject", "abstract": "Rejected body still admitted"},
         {"url": "https://example.com/unavailable", "abstract": "Stored unavailable"},
         {"url": "https://example.com/b", "abstract": "B abstract"},
+        {"url": "https://example.com/c", "abstract": "C would be staged"},
+        {"url": "https://example.com/d", "abstract": "D survives judge failure"},
     ]
 
     a = store.get(normalize_url("https://example.com/a"))
@@ -180,7 +186,12 @@ async def test_keyword_search_validates_body_then_commits_deterministic_first_wr
     rejected = store.get(normalize_url("https://example.com/reject"))
     assert rejected is not None and rejected.raw_content == "" and rejected.available is True
     assert store.get(normalize_url("https://example.com/skip")) is None
-    assert store.get(normalize_url("https://example.com/c")) is None
+    staged_before_failure = store.get(normalize_url("https://example.com/c"))
+    assert staged_before_failure is not None
+    assert staged_before_failure.abstract == "C would be staged"
+    staged_after_failure = store.get(normalize_url("https://example.com/d"))
+    assert staged_after_failure is not None
+    assert staged_after_failure.abstract == "D survives judge failure"
     assert "explode-body-unavailable-must-be-skipped" not in "\n".join(judge_client.candidates)
 
     second_path = Path(await orchestrator.keyword_search("query", request_id="22222222"))

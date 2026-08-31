@@ -55,3 +55,67 @@ async def test_tavily_adapter_conforms_to_registered_search_and_fetch_contracts(
     )
     with pytest.raises(ExecutionFailure):
         await bad.fetch(normalize_url("https://example.com/a"))
+
+
+async def test_tavily_fetch_accepts_normalized_equivalent_url_after_malformed_results() -> None:
+    adapter = TavilyAdapter(
+        name="tavily",
+        api_url="https://tavily.example.test",
+        secret=SecretValue("x"),
+        http_executor=RecordingJsonExecutor(
+            [
+                {
+                    "results": [
+                        None,
+                        {"url": 1, "raw_content": "ignored"},
+                        {
+                            "url": " https://EXAMPLE.COM/a ",
+                            "raw_content": "Extracted body",
+                        },
+                    ]
+                }
+            ]
+        ),
+    )
+
+    candidate = await adapter.fetch(normalize_url("https://example.com/a"))
+
+    assert candidate == URLFetchCandidate("Extracted body", "")
+
+
+@pytest.mark.parametrize(
+    ("payload", "reason"),
+    [
+        ({}, "invalid_results_envelope"),
+        ({"results": {}}, "invalid_results_envelope"),
+        ({"results": []}, "no_matching_result"),
+        (
+            {"results": [{"url": "https://example.com/other", "raw_content": "body"}]},
+            "no_matching_result",
+        ),
+        (
+            {"results": [{"url": "https://example.com/a", "raw_content": ""}]},
+            "empty_raw_content",
+        ),
+        (
+            {"results": [{"url": "https://example.com/a"}]},
+            "empty_raw_content",
+        ),
+    ],
+)
+async def test_tavily_fetch_classifies_unusable_extract_responses(
+    payload: object,
+    reason: str,
+) -> None:
+    adapter = TavilyAdapter(
+        name="tavily",
+        api_url="https://tavily.example.test",
+        secret=SecretValue("x"),
+        http_executor=RecordingJsonExecutor([payload]),
+    )
+
+    with pytest.raises(ExecutionFailure) as caught:
+        await adapter.fetch(normalize_url("https://example.com/a"))
+
+    assert caught.value.reason == reason
+    assert reason in caught.value.message

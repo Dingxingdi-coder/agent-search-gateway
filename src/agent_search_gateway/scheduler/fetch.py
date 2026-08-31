@@ -110,38 +110,6 @@ class FetchScheduler:
         try:
             candidate = await provider.fetch(url)
             self._validate_candidate(candidate)
-            log_event(
-                self._logger,
-                logging.DEBUG,
-                "candidate_accepted",
-                provider=provider.name,
-                url=target_url_for_log(str(url)),
-                raw_chars=len(candidate.raw_content),
-                content_chars=len(candidate.content),
-            )
-            validation_candidate = (
-                candidate.content if candidate.content != "" else candidate.raw_content
-            )
-            if not cheap_check(validation_candidate):
-                self._log_body_rejected(provider.name, url, "cheap_check")
-                self._log_provider_completed(provider.name, url, started, "semantic_failure")
-                return FetchOutcome("semantic_failure")
-            decision = await self._stages.judge(validation_candidate)
-            if not decision.ok:
-                self._log_body_rejected(provider.name, url, "judge_rejected")
-                self._log_provider_completed(provider.name, url, started, "semantic_failure")
-                return FetchOutcome("semantic_failure")
-            log_event(
-                self._logger,
-                logging.DEBUG,
-                "body_accepted",
-                provider=provider.name,
-                url=target_url_for_log(str(url)),
-                raw_chars=len(candidate.raw_content),
-                content_chars=len(candidate.content),
-            )
-            self._log_provider_completed(provider.name, url, started, "accepted")
-            return FetchOutcome("accepted", candidate)
         except asyncio.CancelledError:
             raise
         except ExecutionFailure as exc:
@@ -154,6 +122,72 @@ class FetchScheduler:
                 f"Fetch provider {provider.name} returned invalid data",
             )
             return FetchOutcome("execution_failure", failures=(failure,))
+
+        log_event(
+            self._logger,
+            logging.DEBUG,
+            "candidate_accepted",
+            provider=provider.name,
+            url=target_url_for_log(str(url)),
+            raw_chars=len(candidate.raw_content),
+            content_chars=len(candidate.content),
+        )
+        validation_candidate = candidate.content or candidate.raw_content
+        if not cheap_check(validation_candidate):
+            self._log_body_rejected(provider.name, url, "cheap_check")
+            self._log_provider_completed(provider.name, url, started, "semantic_failure")
+            return FetchOutcome("semantic_failure")
+
+        try:
+            decision = await self._stages.judge(validation_candidate)
+        except asyncio.CancelledError:
+            raise
+        except ExecutionFailure as exc:
+            failure = ExecutionFailure(
+                exc.code,
+                exc.message,
+                reason=exc.reason or "judge_execution_failed",
+            )
+            self._log_provider_failed(
+                provider.name,
+                url,
+                started,
+                failure,
+                failed_stage="judge",
+                dependency=self._stages.judge_provider,
+            )
+            raise failure from exc
+        except Exception as exc:
+            failure = ExecutionFailure(
+                ErrorCode.LLM_STAGE_FAILED,
+                "Judge LLM stage failed",
+                reason="judge_execution_failed",
+            )
+            self._log_provider_failed(
+                provider.name,
+                url,
+                started,
+                failure,
+                failed_stage="judge",
+                dependency=self._stages.judge_provider,
+            )
+            raise failure from exc
+
+        if not decision.ok:
+            self._log_body_rejected(provider.name, url, "judge_rejected")
+            self._log_provider_completed(provider.name, url, started, "semantic_failure")
+            return FetchOutcome("semantic_failure")
+        log_event(
+            self._logger,
+            logging.DEBUG,
+            "body_accepted",
+            provider=provider.name,
+            url=target_url_for_log(str(url)),
+            raw_chars=len(candidate.raw_content),
+            content_chars=len(candidate.content),
+        )
+        self._log_provider_completed(provider.name, url, started, "accepted")
+        return FetchOutcome("accepted", candidate)
 
     def _log_body_rejected(
         self,
@@ -194,7 +228,39 @@ class FetchScheduler:
         url: NormalizedURL,
         started: float,
         exc: Exception,
+        *,
+        failed_stage: str | None = None,
+        dependency: str | None = None,
     ) -> None:
+        reason = exc.reason if isinstance(exc, ExecutionFailure) else None
+        if failed_stage is not None:
+            log_event(
+                self._logger,
+                logging.DEBUG,
+                "provider_failed",
+                provider=provider,
+                stage="fetch",
+                url=target_url_for_log(str(url)),
+                error_type=type(exc).__name__,
+                elapsed_ms=elapsed_ms(self._monotonic, started),
+                failed_stage=failed_stage,
+                dependency=dependency or "-",
+                reason=reason or "judge_execution_failed",
+            )
+            return
+        if reason:
+            log_event(
+                self._logger,
+                logging.DEBUG,
+                "provider_failed",
+                provider=provider,
+                stage="fetch",
+                url=target_url_for_log(str(url)),
+                error_type=type(exc).__name__,
+                elapsed_ms=elapsed_ms(self._monotonic, started),
+                reason=reason,
+            )
+            return
         log_event(
             self._logger,
             logging.DEBUG,
