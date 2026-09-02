@@ -25,6 +25,12 @@ RESERVED_SUFFIXES = (
     ".test",
 )
 ZERO_SHA = "0" * 40
+_SCANNER_SELF_TEST_PATH = "tests/scripts/test_check_sensitive_urls.py"
+_SCANNER_SELF_TEST_URLS = (
+    "https" + "://user:password@internal.company/path",
+    "http" + "://user@intranet.local/path",
+    "https" + "://user:password@[broken-ipv6/path",
+)
 
 
 def run_git(*arguments: str, allow_no_matches: bool = False) -> str:
@@ -41,6 +47,18 @@ def run_git(*arguments: str, allow_no_matches: bool = False) -> str:
     if allow_no_matches and completed.returncode == 1:
         return ""
     raise RuntimeError(completed.stderr.strip() or f"git {' '.join(arguments)} failed")
+
+
+def revision_exists(revision: str) -> bool:
+    """Return whether revision resolves to a commit in the local checkout."""
+    completed = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"{revision}^{{commit}}"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return completed.returncode == 0
 
 
 def is_reserved_example_host(host: str | None) -> bool:
@@ -69,6 +87,20 @@ def has_sensitive_userinfo(text: str) -> bool:
     return False
 
 
+def without_scanner_self_test_urls(path: str, text: str) -> str:
+    """Remove exact historical scanner sentinels from only the scanner's test file.
+
+    Full-history scans include snapshots created before the test values were split into
+    source fragments. Removing only those values keeps the audit runnable while still
+    checking any other URL on the same line and every occurrence in other files.
+    """
+    if path != _SCANNER_SELF_TEST_PATH:
+        return text
+    for sentinel in _SCANNER_SELF_TEST_URLS:
+        text = text.replace(sentinel, "")
+    return text
+
+
 def event_range(event_path: Path) -> tuple[str | None, str | None]:
     """Extract the before/after or pull-request base/head range from a GitHub event."""
     payload: dict[str, Any] = json.loads(event_path.read_text(encoding="utf-8"))
@@ -91,17 +123,24 @@ def event_range(event_path: Path) -> tuple[str | None, str | None]:
 
 def commit_snapshots(*, base: str | None, head: str | None, all_history: bool) -> tuple[str, ...]:
     """Return commit snapshots that must be checked."""
+    effective_head = head if head is not None and revision_exists(head) else "HEAD"
+
     if all_history:
         revisions = run_git("rev-list", "--all").splitlines()
-    elif head is not None and base == ZERO_SHA:
-        revisions = run_git("rev-list", head).splitlines()
-    elif base is not None and head is not None:
+    elif base == ZERO_SHA:
+        revisions = run_git("rev-list", effective_head).splitlines()
+    elif base is not None and head is not None and revision_exists(base) and revision_exists(head):
         revisions = run_git("rev-list", "--reverse", f"{base}..{head}").splitlines()
+    elif head is not None:
+        # A force push can make the event's previous SHA unreachable. Scanning every
+        # commit reachable from the new head is conservative and avoids silently
+        # skipping the replacement history.
+        revisions = run_git("rev-list", effective_head).splitlines()
     else:
-        revisions = [head or "HEAD"]
+        revisions = [effective_head]
 
     if not revisions:
-        revisions = [head or "HEAD"]
+        revisions = [effective_head]
     return tuple(dict.fromkeys(revisions))
 
 
@@ -124,7 +163,7 @@ def findings_for_revision(revision: str) -> Iterable[tuple[str, int]]:
             _revision, path, line_number, text = row.split(":", 3)
         except ValueError:
             continue
-        if has_sensitive_userinfo(text):
+        if has_sensitive_userinfo(without_scanner_self_test_urls(path, text)):
             yield path, int(line_number)
 
 
