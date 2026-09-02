@@ -16,6 +16,10 @@ updates:
       python-dependencies:
         patterns:
           - "*"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
     labels:
       - dependencies
     commit-message:
