@@ -19,9 +19,7 @@ from .common import (
 )
 
 _VALID_MODES = frozenset({"turbo", "fast", "basic", "advanced"})
-_FETCH_POLICY_KEYS = frozenset(
-    {"max_age_seconds", "timeout_seconds", "disable_cache_fallback"}
-)
+_FETCH_POLICY_KEYS = frozenset({"max_age_seconds", "timeout_seconds", "disable_cache_fallback"})
 _MIN_MAX_AGE_SECONDS = 600
 
 
@@ -100,9 +98,7 @@ class ParallelAdapter:
         if self._mode is not None:
             request_body["mode"] = self._mode
         if self._search_fetch_policy is not None:
-            request_body["advanced_settings"] = {
-                "fetch_policy": dict(self._search_fetch_policy)
-            }
+            request_body["advanced_settings"] = {"fetch_policy": dict(self._search_fetch_policy)}
 
         payload = await self._http.request_json(
             "POST",

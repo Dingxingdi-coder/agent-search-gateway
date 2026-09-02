@@ -132,9 +132,7 @@ class CrossrefProvider:
         for key in _DATE_KEYS:
             date_mapping = as_mapping(mapping.get(key))
             parts_rows = (
-                as_list(date_mapping.get("date-parts"))
-                if date_mapping is not None
-                else None
+                as_list(date_mapping.get("date-parts")) if date_mapping is not None else None
             )
             if not parts_rows:
                 continue

@@ -361,9 +361,7 @@ async def test_doctor_runs_locally_renders_all_checks_and_uses_report_exit_code(
     assert runner_calls == 1
     assert code == 1
     assert stdout.getvalue() == (
-        "[ok] configuration valid\n"
-        "[info] daemon not running\n"
-        "[fail] synthetic failure\n"
+        "[ok] configuration valid\n[info] daemon not running\n[fail] synthetic failure\n"
     )
     assert stderr.getvalue() == ""
 

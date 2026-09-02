@@ -1,0 +1,107 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Verify and build distributions
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      WEB_SEARCH_RUN_INTEGRATION: "0"
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: false
+      - name: Verify tag and package versions
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: python scripts/verify_release_version.py "$TAG_NAME"
+      - name: Sync locked environment
+        run: uv sync --locked --all-groups
+      - name: Check formatting
+        run: uv run ruff format --check src tests scripts
+      - name: Lint
+        run: uv run ruff check .
+      - name: Type-check
+        run: uv run mypy src tests scripts
+      - name: Test
+        run: uv run pytest -v
+      - name: Build documentation
+        run: uv run python scripts/build_docs.py
+      - name: Build distributions
+        run: uv build
+      - name: Upload verified distributions
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: distributions
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  provenance:
+    name: Attest build provenance
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - name: Download verified distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: distributions
+          path: dist/
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: "dist/*"
+
+  publish:
+    name: Publish GitHub Release
+    needs: [build, provenance]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download attested distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: distributions
+          path: dist/
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" dist/* --clobber
+          else
+            release_args=(--generate-notes --title "$TAG_NAME" --verify-tag)
+            if [[ "$TAG_NAME" == *-* ]]; then
+              release_args+=(--prerelease)
+            fi
+            gh release create "$TAG_NAME" dist/* "${release_args[@]}"
+          fi

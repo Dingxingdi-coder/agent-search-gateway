@@ -62,9 +62,7 @@ class ScrapeDoAdapter:
         return hits
 
     async def fetch(self, url: NormalizedURL) -> URLFetchCandidate:
-        params = urlencode(
-            {"token": self._secret.reveal(), "url": str(url), "output": "markdown"}
-        )
+        params = urlencode({"token": self._secret.reveal(), "url": str(url), "output": "markdown"})
         request_url = f"{self._api_url}?{params}"
         text = await self._http.request_text("GET", request_url, stage="fetch")
         if not text.strip():

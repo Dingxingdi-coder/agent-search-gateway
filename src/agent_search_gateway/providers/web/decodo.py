@@ -49,9 +49,7 @@ class DecodoAdapter:
                 result = require_object(item, self.name, "search", "result")
                 hits.append(
                     KeywordSearchHit(
-                        url=non_empty_string(
-                            result.get("url"), self.name, "search", "result.url"
-                        ),
+                        url=non_empty_string(result.get("url"), self.name, "search", "result.url"),
                         title=optional_string(
                             result.get("title"), self.name, "search", "result.title"
                         ),

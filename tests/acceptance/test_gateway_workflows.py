@@ -66,20 +66,21 @@ async def test_real_socket_workflows_match_public_contract_without_network(
     paper_stdout = io.StringIO()
     paper_stderr = io.StringIO()
     paper_args = build_parser().parse_args(["paper-search", "academic topic"])
-    assert await run_command(
-        paper_args,
-        paths,
-        stdout=paper_stdout,
-        stderr=paper_stderr,
-    ) == 0
+    assert (
+        await run_command(
+            paper_args,
+            paths,
+            stdout=paper_stdout,
+            stderr=paper_stderr,
+        )
+        == 0
+    )
     assert paper_stderr.getvalue() == ""
     paper_path = Path(paper_stdout.getvalue().strip())
     assert paper_path.name.startswith("paper-")
     assert paper_path.name.endswith(".jsonl")
     assert len(paper_path.stem.removeprefix("paper-")) == 8
-    paper_lines = [
-        json.loads(line) for line in paper_path.read_text(encoding="utf-8").splitlines()
-    ]
+    paper_lines = [json.loads(line) for line in paper_path.read_text(encoding="utf-8").splitlines()]
     assert [line["title"] for line in paper_lines] == [
         "Direct Academic Paper",
         "Unique CORE Paper",
@@ -110,21 +111,20 @@ async def test_real_socket_workflows_match_public_contract_without_network(
 
     mixed_stdout = io.StringIO()
     mixed_stderr = io.StringIO()
-    mixed_args = build_parser().parse_args(
-        ["llm-search", "find web and papers", "--scope", "all"]
+    mixed_args = build_parser().parse_args(["llm-search", "find web and papers", "--scope", "all"])
+    assert (
+        await run_command(
+            mixed_args,
+            paths,
+            stdout=mixed_stdout,
+            stderr=mixed_stderr,
+        )
+        == 0
     )
-    assert await run_command(
-        mixed_args,
-        paths,
-        stdout=mixed_stdout,
-        stderr=mixed_stderr,
-    ) == 0
     assert mixed_stderr.getvalue() == ""
     mixed_path = Path(mixed_stdout.getvalue().strip())
     assert mixed_path.name.startswith("llm-")
-    mixed_lines = [
-        json.loads(line) for line in mixed_path.read_text(encoding="utf-8").splitlines()
-    ]
+    mixed_lines = [json.loads(line) for line in mixed_path.read_text(encoding="utf-8").splitlines()]
     assert [line["type"] for line in mixed_lines] == ["web", "paper"]
     assert mixed_lines[0]["url"] == "https://example.com/llm"
     assert mixed_lines[1]["title"] == "LLM Academic Paper"

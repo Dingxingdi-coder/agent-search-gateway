@@ -3,27 +3,179 @@ name: ci
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  verify:
+  quality:
+    name: Quality checks
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     env:
       WEB_SEARCH_RUN_INTEGRATION: "0"
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
           python-version: "3.12"
           enable-cache: true
-      - run: uv sync --locked
-      - run: uv run ruff check .
-      - run: uv run mypy src tests
-      - run: uv run pytest -v
-      - name: Smoke-test uv tool installation
+      - name: Sync locked environment
+        run: uv sync --locked --group dev
+      - name: Check formatting
+        run: uv run ruff format --check src tests scripts
+      - name: Lint
+        run: uv run ruff check .
+      - name: Type-check
+        run: uv run mypy src tests scripts
+
+  tests:
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      PYTHON_VERSION: ${{ matrix.python-version }}
+      WEB_SEARCH_RUN_INTEGRATION: "0"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          - os: ubuntu-latest
+            python-version: "3.14"
+          - os: macos-latest
+            python-version: "3.12"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Sync locked environment
+        run: uv sync --locked --group dev --python "$PYTHON_VERSION"
+      - name: Test
+        run: uv run pytest -v
+
+  docs:
+    name: Documentation build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Sync locked documentation environment
+        run: uv sync --locked --group docs
+      - name: Build documentation
+        run: uv run python scripts/build_docs.py
+      - name: Verify documentation artifact
+        run: |
+          test -f site/index.html
+          test -f site/api/agent_search_gateway.html
+          ! grep -F '{{PROJECT_VERSION}}' site/index.html
+
+  package:
+    name: Package smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Build distributions
+        run: uv build
+      - name: Smoke-test the built wheel
         env:
           UV_TOOL_DIR: ${{ runner.temp }}/agent-search-gateway-tools
           UV_TOOL_BIN_DIR: ${{ runner.temp }}/agent-search-gateway-bin
         run: |
-          uv tool install .
+          uv tool install --force dist/*.whl
           "$UV_TOOL_BIN_DIR/agent-search-gateway" --help
           "$UV_TOOL_BIN_DIR/agent-search-gateway" start --help
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reject credential-bearing non-example URLs
+        run: python scripts/check_sensitive_urls.py --github-event "$GITHUB_EVENT_PATH"
+      - name: Scan changed commits for secrets
+        uses: trufflesecurity/trufflehog@20652fbbdefffcdaa493a5bf57ab2ac6b1db715b # v3.97.1
+        with:
+          # Reserved URI fixtures are handled by the preceding structural scan.
+          extra_args: --results=verified,unknown --exclude-detectors=URI
+
+  verify:
+    name: verify
+    if: ${{ always() }}
+    needs: [quality, tests, docs, package, secret-scan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Confirm every required job succeeded
+        env:
+          DOCS_RESULT: ${{ needs.docs.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          SECRET_SCAN_RESULT: ${{ needs.secret-scan.result }}
+          TESTS_RESULT: ${{ needs.tests.result }}
+        run: |
+          for result in \
+            "$QUALITY_RESULT" \
+            "$TESTS_RESULT" \
+            "$DOCS_RESULT" \
+            "$PACKAGE_RESULT" \
+            "$SECRET_SCAN_RESULT"
+          do
+            test "$result" = "success"
+          done

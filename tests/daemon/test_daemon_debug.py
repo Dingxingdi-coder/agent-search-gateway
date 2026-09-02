@@ -140,9 +140,7 @@ async def test_default_runtime_registers_resolved_secrets_before_runtime_build(
         ),
         llm=SimpleNamespace(providers=(SimpleNamespace(secret=second_secret),)),
         academic=SimpleNamespace(
-            providers=(
-                SimpleNamespace(api_key=third_secret, contact_email=None),
-            )
+            providers=(SimpleNamespace(api_key=third_secret, contact_email=None),)
         ),
         oa_resolver=SimpleNamespace(api_key=None, contact_email=fourth_secret),
     )
@@ -210,7 +208,7 @@ async def test_default_runtime_registers_resolved_secrets_before_runtime_build(
     assert "llm-secret-value" not in text
     assert third_secret.reveal() not in text
     assert fourth_secret.reveal() not in text
-    assert "detail=\"<redacted> <redacted> <redacted> <redacted>\"" in text
+    assert 'detail="<redacted> <redacted> <redacted> <redacted>"' in text
 
 
 async def test_debug_workflow_lifecycle_logs_are_correlated_and_payload_safe(
@@ -271,16 +269,13 @@ async def test_debug_workflow_lifecycle_logs_are_correlated_and_payload_safe(
     second = [line for line in text.splitlines() if "request=22222222" in line]
     third = [line for line in text.splitlines() if "request=33333333" in line]
     assert any("event=workflow_started" in line for line in first)
-    assert any(
-        "event=workflow_completed" in line and "elapsed_ms=" in line for line in first
-    )
+    assert any("event=workflow_completed" in line and "elapsed_ms=" in line for line in first)
     assert any(
         "event=workflow_failed" in line and "error_code=all_providers_failed" in line
         for line in second
     )
     assert all("traceback=" not in line for line in second)
     assert any(
-        "event=workflow_failed" in line and "error_type=RuntimeError" in line
-        for line in third
+        "event=workflow_failed" in line and "error_type=RuntimeError" in line for line in third
     )
     assert any("traceback=" in line for line in third)

@@ -65,9 +65,7 @@ def test_provider_native_ids_are_canonical_and_source_namespaced() -> None:
         "649DEF34F8BE52C8B66281AF98AE884C09AEF38B"
     )
     assert normalize_openalex_id("https://openalex.org/w2741809807") == "W2741809807"
-    assert normalize_dblp_key(
-        "https://dblp.org/rec/conf/nips/VaswaniSPUJGKP17.html"
-    ) == (
+    assert normalize_dblp_key("https://dblp.org/rec/conf/nips/VaswaniSPUJGKP17.html") == (
         "conf/nips/VaswaniSPUJGKP17"
     )
     assert normalize_core_id(" 123456789 ") == "123456789"
@@ -75,8 +73,9 @@ def test_provider_native_ids_are_canonical_and_source_namespaced() -> None:
     assert source_identity_key("core", "W123") == "core:W123"
 
 
-def test_bibliographic_fingerprint_requires_exact_title_author_overlap_and_same_known_year(
-) -> None:
+def test_bibliographic_fingerprint_requires_exact_title_author_overlap_and_same_known_year() -> (
+    None
+):
     left = bibliographic_fingerprint(
         "  Attention   Is All You Need ",
         ("Ashish Vaswani", "Noam Shazeer"),

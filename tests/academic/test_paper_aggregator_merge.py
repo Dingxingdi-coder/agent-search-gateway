@@ -89,9 +89,7 @@ def test_merge_is_deterministic_across_input_permutations_and_unions_identifiers
     assert expected.venue == "Example Conference"
     assert expected.published_date == date(2024, 1, 2)
     assert expected.updated_date == date(2024, 2, 3)
-    assert str(expected.pdf_url) == (
-        "https://arxiv.org/pdf/2401.44444v2.pdf"
-    )
+    assert str(expected.pdf_url) == ("https://arxiv.org/pdf/2401.44444v2.pdf")
     assert expected.identifiers.doi == DOI
     assert expected.identifiers.arxiv_id == "2401.44444"
     assert expected.identifiers.semantic_scholar_id == "ABCDEF44"

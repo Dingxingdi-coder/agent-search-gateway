@@ -39,16 +39,21 @@ def test_readme_documents_debug_and_doctor_operational_contract() -> None:
     assert "informational" in readme
 
 
-def test_ci_preserves_locked_verification_and_uses_isolated_tool_smoke() -> None:
+def test_ci_preserves_locked_verification_and_smokes_built_wheel() -> None:
     workflow = (_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
 
     assert "uv sync --locked" in workflow
     assert "uv run ruff check ." in workflow
     assert "uv run mypy src tests" in workflow
     assert "uv run pytest -v" in workflow
-    assert "Smoke-test uv tool installation" in workflow
+    assert "Build distributions" in workflow
+    assert "Smoke-test the built wheel" in workflow
     assert "UV_TOOL_DIR: ${{ runner.temp }}/agent-search-gateway-tools" in workflow
     assert "UV_TOOL_BIN_DIR: ${{ runner.temp }}/agent-search-gateway-bin" in workflow
-    assert "uv tool install ." in workflow
+    assert "uv tool install --force dist/*.whl" in workflow
     assert '"$UV_TOOL_BIN_DIR/agent-search-gateway" --help' in workflow
     assert '"$UV_TOOL_BIN_DIR/agent-search-gateway" start --help' in workflow
+    assert "permissions: {}" in workflow
+    assert "persist-credentials: false" in workflow
+    assert "uses: actions/checkout@v" not in workflow
+    assert "uses: astral-sh/setup-uv@v" not in workflow

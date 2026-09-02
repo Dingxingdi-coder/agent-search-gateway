@@ -132,7 +132,5 @@ def test_default_registry_marks_only_jina_credentialless() -> None:
     assert jina.allowed_config_keys == frozenset({"api_url"})
     assert jina.requires_api_key is False
     assert {
-        item.name
-        for item in registry.list_in_registration_order()
-        if not item.requires_api_key
+        item.name for item in registry.list_in_registration_order() if not item.requires_api_key
     } == {"jina"}

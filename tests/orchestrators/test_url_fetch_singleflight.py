@@ -208,12 +208,10 @@ async def test_url_fetch_singleflight_preserves_leader_provider_correlation() ->
     assert any("event=singleflight_leader" in line for line in leader_lines)
     assert any("event=singleflight_joined" in line for line in follower_lines)
     assert any(
-        "event=provider_started" in line and "provider=fetch" in line
-        for line in leader_lines
+        "event=provider_started" in line and "provider=fetch" in line for line in leader_lines
     )
     assert any(
-        "event=provider_completed" in line and "provider=fetch" in line
-        for line in leader_lines
+        "event=provider_completed" in line and "provider=fetch" in line for line in leader_lines
     )
     assert any("event=url_lock_acquired" in line for line in leader_lines)
     assert all("event=provider_started" not in line for line in follower_lines)

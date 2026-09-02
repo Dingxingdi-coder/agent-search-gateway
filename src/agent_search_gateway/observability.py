@@ -129,8 +129,10 @@ def _url_for_log(value: str, *, keep_query: bool, keep_fragment: bool) -> str:
 
 
 def _render_string(value: str) -> str:
-    if value and value.isprintable() and not any(
-        character.isspace() or character in {'"', "\\"} for character in value
+    if (
+        value
+        and value.isprintable()
+        and not any(character.isspace() or character in {'"', "\\"} for character in value)
     ):
         return value
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))

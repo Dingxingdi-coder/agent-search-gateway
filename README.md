@@ -1,16 +1,23 @@
 # agent-search-gateway
 
+[![CI](https://github.com/Dingxingdi/agent-search-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/Dingxingdi/agent-search-gateway/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 `agent-search-gateway` is a local foreground daemon plus a thin CLI for aggregated keyword search, LLM-assisted search, and fetching URLs that were admitted by search.
 
 Version 0.1 keeps URL admission and body state in daemon memory. Restarting the daemon clears that state. The daemon communicates over a local Unix-domain socket, so this version targets Unix-like environments. It does not provide persistent URL state, remote daemon access, automatic repairs, or live provider checks in `doctor`.
 
-## End-user installation
+## Installation
 
-Install the CLI from the current source checkout with `uv tool`. This creates an isolated runtime for the command and does not use the repository `uv.lock` as the installed tool environment.
+The project requires Python 3.11 or newer on a Unix-like system. Install [uv](https://docs.astral.sh/uv/), clone a tagged release, and install the CLI into an isolated tool environment:
 
 ```bash
+git clone https://github.com/Dingxingdi/agent-search-gateway.git
+cd agent-search-gateway
 uv tool install .
 ```
+
+For a reproducible installation, check out a specific release tag before running `uv tool install .`. Tagged GitHub Releases also contain a wheel and source distribution built by CI. The repository `uv.lock` controls development and CI; the installed tool environment is resolved independently. PyPI publishing is not configured yet.
 
 Create `~/.config/agent-search-gateway-cli/config.toml` from `config.example.toml` and adjust the enabled providers. Only providers that require credentials use `api_key_env`; export the environment variables named by those entries. The configuration stores environment-variable names only; credential values remain in the daemon process environment.
 
@@ -207,17 +214,25 @@ The implementation does not intentionally log query/prompt/page/model-response b
 
 Expected provider/retry/semantic failures are logged as concise events without tracebacks. Unexpected daemon workflow failures include a traceback only in DEBUG mode. Logging sink failures after successful startup do not change business workflow results.
 
+## Public interface and compatibility
+
+The CLI commands, documented configuration, stdout contracts, result-file schemas, and runtime paths are the supported interfaces for the current `0.x` line. Python module imports and the local socket wire protocol remain internal implementation details. See [the public interface and compatibility policy](docs/public-interface.md) before building automation against the project.
+
+A static documentation site and generated internal Python reference are built in CI and published through GitHub Actions at the [project documentation site](https://dingxingdi.github.io/agent-search-gateway/).
+
 ## Development and verification
 
-Development and CI remain lockfile-driven. `uv sync --locked` is intentionally separate from the end-user `uv tool install .` flow because lint, type-check, and test dependencies belong to the repository development environment.
+Development and CI remain lockfile-driven. `uv sync --locked` is intentionally separate from the end-user `uv tool install .` flow because lint, type-check, documentation, and test dependencies belong to the repository development environment.
 
 Run the default no-network development checks with:
 
 ```bash
-uv sync --locked
+uv sync --locked --all-groups
+uv run ruff format --check src tests scripts
 uv run ruff check .
-uv run mypy src tests
+uv run mypy src tests scripts
 uv run pytest -v
+uv run python scripts/build_docs.py
 ```
 
 The default test suite uses fakes, local Unix sockets, and mock transports and does not require provider credentials.
@@ -234,3 +249,19 @@ PARALLEL_API_KEY=...
 ```
 
 `OPENAI_MODEL` may optionally select the chat-completions model used by the OpenAI-compatible connectivity check. Parallel Search and Extract use `PARALLEL_API_KEY` when their opt-in live checks are enabled. These integration checks validate connectivity and basic response shape only; normal CI does not enable them.
+
+## Contributing and support
+
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and pull-request expectations, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community standards. Support is community-provided on a best-effort basis with no guaranteed response time; see [SUPPORT.md](SUPPORT.md).
+
+## Security
+
+Do not report vulnerabilities in public issues or pull requests. Follow [SECURITY.md](SECURITY.md) and use the repository's private vulnerability-reporting flow. Configuration should contain environment-variable names rather than credential values, and debug logs must be reviewed as sensitive local artifacts before sharing.
+
+## Releases
+
+The project follows Semantic Versioning for tagged releases and records user-visible changes in [CHANGELOG.md](CHANGELOG.md). GitHub Release `v0.1.0` is the initial public release; tagged releases are built, attested, and published by CI. PyPI publishing is not configured yet. Maintainers should follow [RELEASING.md](RELEASING.md).
+
+## License
+
+This project is available under the [MIT License](LICENSE).

@@ -148,12 +148,15 @@ async def test_debug_cli_workflow_preserves_public_contract_and_correlates_trace
 
     stop_stdout = StringIO()
     stop_stderr = StringIO()
-    assert await run_command(
-        parser.parse_args(["stop"]),
-        paths,
-        stdout=stop_stdout,
-        stderr=stop_stderr,
-    ) == 0
+    assert (
+        await run_command(
+            parser.parse_args(["stop"]),
+            paths,
+            stdout=stop_stdout,
+            stderr=stop_stderr,
+        )
+        == 0
+    )
     assert stop_stdout.getvalue() == "Daemon stopped.\n"
     assert stop_stderr.getvalue() == ""
     assert await start_task == 0
@@ -176,21 +179,17 @@ async def test_debug_cli_workflow_preserves_public_contract_and_correlates_trace
     assert any("event=workflow_started" in line for line in request_lines)
     assert any("event=workflow_completed" in line for line in request_lines)
     assert any(
-        "event=provider_started" in line and "provider=keyword" in line
-        for line in request_lines
+        "event=provider_started" in line and "provider=keyword" in line for line in request_lines
     )
     assert any(
-        "event=provider_completed" in line and "provider=keyword" in line
-        for line in request_lines
+        "event=provider_completed" in line and "provider=keyword" in line for line in request_lines
     )
     assert any("event=body_accepted" in line for line in request_lines)
     assert any(
-        "event=body_rejected" in line and "reason=judge_rejected" in line
-        for line in request_lines
+        "event=body_rejected" in line and "reason=judge_rejected" in line for line in request_lines
     )
     assert any(
-        "event=results_written" in line and str(result_path) in line
-        for line in request_lines
+        "event=results_written" in line and str(result_path) in line for line in request_lines
     )
     assert "https://example.com/accepted?id=42&mode=test" in debug_log
     assert "https://example.com/rejected?id=43&mode=test" in debug_log
@@ -224,21 +223,27 @@ async def test_normal_mode_equivalent_workflow_creates_no_debug_log(tmp_path: Pa
 
     stdout = StringIO()
     stderr = StringIO()
-    assert await run_command(
-        parser.parse_args(["keyword-search", "normal query"]),
-        paths,
-        stdout=stdout,
-        stderr=stderr,
-    ) == 0
+    assert (
+        await run_command(
+            parser.parse_args(["keyword-search", "normal query"]),
+            paths,
+            stdout=stdout,
+            stderr=stderr,
+        )
+        == 0
+    )
     assert Path(stdout.getvalue().strip()).name == "keyword-b1b2c3d4.jsonl"
     assert stderr.getvalue() == ""
 
-    assert await run_command(
-        parser.parse_args(["stop"]),
-        paths,
-        stdout=StringIO(),
-        stderr=StringIO(),
-    ) == 0
+    assert (
+        await run_command(
+            parser.parse_args(["stop"]),
+            paths,
+            stdout=StringIO(),
+            stderr=StringIO(),
+        )
+        == 0
+    )
     assert await start_task == 0
     assert start_stdout.getvalue() == ""
     assert start_stderr.getvalue() == ""

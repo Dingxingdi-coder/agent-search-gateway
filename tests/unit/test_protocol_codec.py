@@ -51,9 +51,7 @@ def test_ndjson_codec_buffers_partial_bytes_and_splits_multiple_requests() -> No
     error = encode_response(ErrorResponse(ErrorCode.BAD_REQUEST, "bad"))
     assert success == b'{"ok":true,"text":"done"}\n'
     assert error == b'{"ok":false,"error":"bad_request","message":"bad"}\n'
-    assert encode_request(LLMSearchRequest("find")) == (
-        b'{"type":"llm_search","prompt":"find"}\n'
-    )
+    assert encode_request(LLMSearchRequest("find")) == (b'{"type":"llm_search","prompt":"find"}\n')
     assert encode_request(LLMSearchRequest("find", "paper")) == (
         b'{"type":"llm_search","prompt":"find","scope":"paper"}\n'
     )
@@ -85,5 +83,5 @@ def test_ndjson_decoder_rejects_oversized_frame_and_resynchronizes() -> None:
     oversized = decoder.feed(b"x" * (_MAX_REQUEST_FRAME_BYTES + 1))
     assert oversized == [ErrorResponse(ErrorCode.BAD_REQUEST, "Request frame is too large")]
 
-    decoded = decoder.feed(b"discard-the-rest\n{\"type\":\"shutdown\"}\n")
+    decoded = decoder.feed(b'discard-the-rest\n{"type":"shutdown"}\n')
     assert decoded == [ShutdownRequest()]
