@@ -35,8 +35,7 @@ def content_clean_messages(raw_content: str) -> tuple[ChatMessage, ...]:
         {
             "role": "system",
             "content": (
-                "Return only the cleaned, readable main content from the supplied raw page "
-                "text."
+                "Return only the cleaned, readable main content from the supplied raw page text."
             ),
         },
         {"role": "user", "content": raw_content},

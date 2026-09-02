@@ -88,9 +88,7 @@ class ExaAdapter:
         if highlights_value is not None:
             highlights = require_list(highlights_value, self.name, "search", "result.highlights")
             if highlights:
-                first = optional_string(
-                    highlights[0], self.name, "search", "result.highlights[0]"
-                )
+                first = optional_string(highlights[0], self.name, "search", "result.highlights[0]")
                 if first.strip():
                     return first
         summary = optional_string(result.get("summary"), self.name, "search", "result.summary")

@@ -123,14 +123,20 @@ async def test_llm_stage_debug_events_are_semantic_and_payload_safe() -> None:
     assert await stages.judge("PAGE_BODY_SENTINEL") == StageDecision(True, "useful")
     assert await stages.safety("FINAL_PAGE_SENTINEL") == StageDecision(False, long_reason)
     assert await stages.content_clean("RAW_PAGE_SENTINEL") == "MODEL_CLEAN_BODY_SENTINEL"
-    assert await stages.focus_summary(
-        "FINAL_PAGE_SENTINEL",
-        "FOCUS_BODY_SENTINEL",
-    ) == "MODEL_FOCUS_BODY_SENTINEL"
-    assert await stages.llm_search_markdown(
-        search,
-        "USER_PROMPT_SENTINEL",
-    ) == "MODEL_SEARCH_BODY_SENTINEL"
+    assert (
+        await stages.focus_summary(
+            "FINAL_PAGE_SENTINEL",
+            "FOCUS_BODY_SENTINEL",
+        )
+        == "MODEL_FOCUS_BODY_SENTINEL"
+    )
+    assert (
+        await stages.llm_search_markdown(
+            search,
+            "USER_PROMPT_SENTINEL",
+        )
+        == "MODEL_SEARCH_BODY_SENTINEL"
+    )
 
     logged = stream.getvalue()
     lines = logged.splitlines()

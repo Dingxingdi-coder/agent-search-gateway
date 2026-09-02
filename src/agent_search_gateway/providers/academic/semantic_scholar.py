@@ -85,8 +85,7 @@ class SemanticScholarProvider:
         authors = tuple(
             name
             for author in authors_raw
-            if (mapping := as_mapping(author)) is not None
-            and (name := text(mapping.get("name")))
+            if (mapping := as_mapping(author)) is not None and (name := text(mapping.get("name")))
         )
         topics = tuple(
             topic

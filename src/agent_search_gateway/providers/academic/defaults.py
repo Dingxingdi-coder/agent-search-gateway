@@ -20,9 +20,7 @@ _ALLOWED_OPTIONS = frozenset({"api_url"})
 def build_default_academic_registry() -> AcademicProviderRegistry:
     registry = AcademicProviderRegistry()
     registrations = (
-        AcademicProviderRegistration(
-            "arxiv", ArxivProvider, _ALLOWED_OPTIONS, "none", "none"
-        ),
+        AcademicProviderRegistration("arxiv", ArxivProvider, _ALLOWED_OPTIONS, "none", "none"),
         AcademicProviderRegistration(
             "semantic_scholar",
             SemanticScholarProvider,
@@ -33,15 +31,11 @@ def build_default_academic_registry() -> AcademicProviderRegistry:
         AcademicProviderRegistration(
             "openalex", OpenAlexProvider, _ALLOWED_OPTIONS, "none", "optional"
         ),
-        AcademicProviderRegistration(
-            "dblp", DblpProvider, _ALLOWED_OPTIONS, "none", "none"
-        ),
+        AcademicProviderRegistration("dblp", DblpProvider, _ALLOWED_OPTIONS, "none", "none"),
         AcademicProviderRegistration(
             "crossref", CrossrefProvider, _ALLOWED_OPTIONS, "none", "optional"
         ),
-        AcademicProviderRegistration(
-            "core", CoreProvider, _ALLOWED_OPTIONS, "required", "none"
-        ),
+        AcademicProviderRegistration("core", CoreProvider, _ALLOWED_OPTIONS, "required", "none"),
     )
     for registration in registrations:
         registry.register(registration)

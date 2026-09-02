@@ -63,7 +63,5 @@ async def test_core_bearer_is_sent_without_authentication_fallback() -> None:
 async def test_core_invalid_results_envelope_is_protocol_failure() -> None:
     executor = RecordingJsonExecutor([_fixture("malformed.json")])
     with pytest.raises(ProtocolFailure) as caught:
-        await CoreProvider(executor, api_key=SecretValue("[REDACTED_SECRET]")).search(
-            "query"
-        )
+        await CoreProvider(executor, api_key=SecretValue("[REDACTED_SECRET]")).search("query")
     assert caught.value.code is ErrorCode.PROTOCOL_ERROR

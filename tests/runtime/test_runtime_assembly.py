@@ -448,9 +448,7 @@ async def test_runtime_assembles_all_academic_providers_resolver_and_closes_once
             "max_concurrency": 4,
         },
     }
-    raw["oa_resolvers"] = {
-        "unpaywall": {"enabled": True, "contact_email_env": "OA_CONTACT"}
-    }
+    raw["oa_resolvers"] = {"unpaywall": {"enabled": True, "contact_email_env": "OA_CONTACT"}}
     environment = {
         "ENV_A": "x",
         "ENV_B": "x",

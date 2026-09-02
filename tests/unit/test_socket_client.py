@@ -58,9 +58,7 @@ async def test_socket_client_accepts_response_larger_than_default_asyncio_limit(
 async def test_socket_client_rejects_oversized_and_stalled_responses(tmp_path: Path) -> None:
     oversized_path = tmp_path / "oversized.sock"
     received: list[bytes] = []
-    oversized_response = (
-        b'{"ok":true,"text":"' + b"x" * (_MAX_RESPONSE_FRAME_BYTES + 1) + b'"}\n'
-    )
+    oversized_response = b'{"ok":true,"text":"' + b"x" * (_MAX_RESPONSE_FRAME_BYTES + 1) + b'"}\n'
     server = await _run_server(oversized_path, oversized_response, received)
     try:
         with pytest.raises(ProtocolFailure, match="too large"):

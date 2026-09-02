@@ -199,11 +199,7 @@ def publication_year(value: date | None) -> int | None:
 
 
 def normalized_authors(authors: tuple[str, ...]) -> frozenset[str]:
-    return frozenset(
-        normalized
-        for author in authors
-        if (normalized := normalize_author(author))
-    )
+    return frozenset(normalized for author in authors if (normalized := normalize_author(author)))
 
 
 def bibliographic_fingerprint(
@@ -230,9 +226,7 @@ def bibliographic_fingerprints_match(
     left_title, left_authors, left_year = left
     right_title, right_authors, right_year = right
     return (
-        left_title == right_title
-        and left_year == right_year
-        and bool(left_authors & right_authors)
+        left_title == right_title and left_year == right_year and bool(left_authors & right_authors)
     )
 
 

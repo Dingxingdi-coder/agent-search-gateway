@@ -43,9 +43,7 @@ from .url_store import URLStore
 
 HttpClientFactory = Callable[[], httpx.AsyncClient]
 _RESERVED_WEB_ADAPTER_KWARGS = frozenset({"name", "http_executor", "secret"})
-_RESERVED_ACADEMIC_ADAPTER_KWARGS = frozenset(
-    {"name", "executor", "api_key", "contact_email"}
-)
+_RESERVED_ACADEMIC_ADAPTER_KWARGS = frozenset({"name", "executor", "api_key", "contact_email"})
 
 
 class Runtime:
@@ -186,9 +184,7 @@ class Runtime:
             academic_providers=",".join(item.name for item in enabled_academic) or "-",
             academic_provider_count=len(enabled_academic),
             oa_resolver=config.oa_resolver.name if config.oa_resolver is not None else "-",
-            web_limits=",".join(
-                f"{item.name}:{item.max_concurrency}" for item in enabled_web
-            )
+            web_limits=",".join(f"{item.name}:{item.max_concurrency}" for item in enabled_web)
             or "-",
             llm_limits=",".join(
                 f"{item.name}:{item.max_concurrency}" for item in config.llm.providers

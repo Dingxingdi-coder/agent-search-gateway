@@ -15,9 +15,7 @@ async def test_jina_fetch_posts_normalized_target_with_no_cache_and_maps_text() 
         api_url="https://reader.example.test/",
         http_executor=executor,
     )
-    target = normalize_url(
-        "https://example.com/path/to/page?q=one&second=two#section"
-    )
+    target = normalize_url("https://example.com/path/to/page?q=one&second=two#section")
 
     assert await adapter.fetch(target) == URLFetchCandidate(sentinel, sentinel)
     assert len(executor.requests) == 1

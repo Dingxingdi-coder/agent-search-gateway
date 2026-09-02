@@ -18,9 +18,10 @@ __pycache__/
 .dmypy.json
 dmypy.json
 
-# Build and packaging artifacts
+# Build, documentation, and packaging artifacts
 build/
 dist/
+/site/
 .eggs/
 *.egg
 *.egg-info/

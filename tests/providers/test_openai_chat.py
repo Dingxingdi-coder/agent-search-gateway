@@ -138,14 +138,10 @@ async def test_openai_protocol_debug_events_exclude_messages_responses_and_crede
     assert all("input_chars=" in line for line in started)
     assert all("extra_body_keys=response_format,temperature" in line for line in started)
     assert any(
-        "event=provider_failed" in line
-        and "reason=protocol_retry" in line
-        and "attempt=1" in line
+        "event=provider_failed" in line and "reason=protocol_retry" in line and "attempt=1" in line
         for line in lines
     )
-    assert any(
-        "event=provider_completed" in line and "output_chars=23" in line for line in lines
-    )
+    assert any("event=provider_completed" in line and "output_chars=23" in line for line in lines)
     assert "USER_MESSAGE_SENTINEL" not in logged
     assert "MODEL_RESPONSE_SENTINEL" not in logged
     assert "CREDENTIAL_SENTINEL" not in logged

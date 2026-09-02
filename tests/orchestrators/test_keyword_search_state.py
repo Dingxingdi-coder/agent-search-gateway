@@ -365,9 +365,7 @@ async def test_keyword_search_debug_events_cover_provider_candidate_body_and_per
             )
         )
 
-    records = [
-        json.loads(line) for line in result_path.read_text(encoding="utf-8").splitlines()
-    ]
+    records = [json.loads(line) for line in result_path.read_text(encoding="utf-8").splitlines()]
     assert all(set(record) == {"url", "abstract"} for record in records)
     assert result_path.name == "keyword-abcddcba.jsonl"
 
@@ -381,9 +379,7 @@ async def test_keyword_search_debug_events_cover_provider_candidate_body_and_per
         for line in lines
     )
     assert any(
-        "event=provider_completed" in line
-        and "provider=success" in line
-        and "hits=6" in line
+        "event=provider_completed" in line and "provider=success" in line and "hits=6" in line
         for line in lines
     )
     assert any(
@@ -395,12 +391,8 @@ async def test_keyword_search_debug_events_cover_provider_candidate_body_and_per
     assert "url=https://example.com/no-body?id=42&mode=test#frag" in logged
     assert "LOG_PASSWORD_SENTINEL" not in logged
     assert any("event=body_skipped" in line and "reason=no_body" in line for line in lines)
-    assert any(
-        "event=body_rejected" in line and "reason=cheap_check" in line for line in lines
-    )
-    assert any(
-        "event=body_rejected" in line and "reason=judge_rejected" in line for line in lines
-    )
+    assert any("event=body_rejected" in line and "reason=cheap_check" in line for line in lines)
+    assert any("event=body_rejected" in line and "reason=judge_rejected" in line for line in lines)
     assert "decision_reason=" not in logged
     assert "not usable" not in logged
     assert any(
@@ -414,9 +406,7 @@ async def test_keyword_search_debug_events_cover_provider_candidate_body_and_per
         for line in lines
     )
     assert any(
-        "event=results_written" in line
-        and "kind=keyword" in line
-        and str(result_path) in line
+        "event=results_written" in line and "kind=keyword" in line and str(result_path) in line
         for line in lines
     )
     for sentinel in (

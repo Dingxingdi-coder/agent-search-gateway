@@ -18,10 +18,13 @@ async def test_llm_paper_stage_uses_separate_strict_prompt_and_safe_logging() ->
         logger=logger,
     )
 
-    assert await stages.llm_paper_search_markdown(
-        invocation,
-        "USER_PAPER_PROMPT_SENTINEL",
-    ) == output
+    assert (
+        await stages.llm_paper_search_markdown(
+            invocation,
+            "USER_PAPER_PROMPT_SENTINEL",
+        )
+        == output
+    )
 
     messages = client.text_calls[0][1]
     assert any("USER_PAPER_PROMPT_SENTINEL" in message["content"] for message in messages)

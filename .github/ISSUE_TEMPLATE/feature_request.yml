@@ -1,0 +1,45 @@
+name: Feature request
+description: Propose a focused improvement or new capability
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the user problem before the implementation. Broad changes may require a design discussion before code is accepted. Do not include secrets, private prompts, customer data, or proprietary provider responses.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user need or limitation should be addressed?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the user-facing behavior, command/configuration changes, and expected output.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Explain workarounds or smaller approaches you considered.
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and security considerations
+      description: Note interface changes, migration needs, credential handling, logging, network behavior, and third-party service implications.
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and the roadmap.
+          required: true
+        - label: I described the user problem separately from the implementation.
+          required: true
+        - label: I removed all secrets and sensitive data from this request.
+          required: true

@@ -1,0 +1,76 @@
+name: Bug report
+description: Report a reproducible problem in agent-search-gateway
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the report. Search existing issues first and remove credentials, signed URLs, private prompts, customer data, and proprietary content before submitting. Security vulnerabilities must follow SECURITY.md instead of this public form.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Provide the release version or full commit SHA.
+      placeholder: v0.1.0 or 0123456789abcdef...
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include operating system, Python version, uv version, and installation method.
+      placeholder: Ubuntu 24.04, Python 3.12, uv 0.12.1, uv tool install .
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      description: The smallest command that reproduces the problem.
+      placeholder: agent-search-gateway doctor
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Use fake credentials and non-sensitive data. Include a minimal redacted configuration when relevant.
+      placeholder: |
+        1. Create config with ...
+        2. Export a fake/test environment variable ...
+        3. Run ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: Include reviewed `doctor` output or the smallest relevant log excerpt. Do not attach full debug logs without auditing them.
+      render: text
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues.
+          required: true
+        - label: I reproduced this with the current release or `main`.
+          required: true
+        - label: I removed all secrets and sensitive data from this report.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

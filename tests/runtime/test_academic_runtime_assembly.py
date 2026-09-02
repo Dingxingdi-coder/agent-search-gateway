@@ -71,10 +71,7 @@ async def test_runtime_instantiates_only_enabled_academic_providers_in_configure
         runtime.search_orchestrator._paper_aggregator
         is runtime.paper_search_orchestrator.aggregator
     )
-    assert (
-        runtime.search_orchestrator._paper_resolver
-        is runtime.paper_search_orchestrator.resolver
-    )
+    assert runtime.search_orchestrator._paper_resolver is runtime.paper_search_orchestrator.resolver
     assert runtime.search_orchestrator._store is runtime.paper_search_orchestrator.store
 
     await runtime.aclose()

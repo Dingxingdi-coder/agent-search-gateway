@@ -76,8 +76,7 @@ async def test_http_executor_retries_retryable_status_and_hides_sensitive_payloa
     assert "Request(" not in logged
 
 
-async def test_http_executor_request_text_returns_exact_body_without_json_decode_or_payload_logging(
-) -> None:
+async def test_request_text_returns_body_without_json_decode_or_payload_logging() -> None:
     body = "# fetched\n<div>TEXT_RESPONSE_MARKER</div>"
     logger, stream = structured_test_logger("tests.http.text-success")
 

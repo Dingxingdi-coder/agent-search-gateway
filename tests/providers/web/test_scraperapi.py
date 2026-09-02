@@ -34,7 +34,9 @@ async def test_scraperapi_search_uses_synchronous_structured_google_endpoint() -
     parsed = urlparse(request.url)
     assert request.method == "GET"
     assert request.stage == "search"
-    assert parsed._replace(query="").geturl() == "https://api.scraperapi.test/structured/google/search"
+    assert (
+        parsed._replace(query="").geturl() == "https://api.scraperapi.test/structured/google/search"
+    )
     assert parse_qs(parsed.query) == {"api_key": ["secret"], "query": ["hello world & docs"]}
 
 

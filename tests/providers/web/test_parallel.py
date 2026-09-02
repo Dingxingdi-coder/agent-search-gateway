@@ -484,9 +484,7 @@ async def test_parallel_extract_without_matching_result_or_error_fails() -> None
         http_executor=RecordingJsonExecutor(
             [
                 {
-                    "results": [
-                        {"url": "https://example.com/other", "full_content": "other body"}
-                    ],
+                    "results": [{"url": "https://example.com/other", "full_content": "other body"}],
                     "errors": [{"url": "https://example.com/also-other"}],
                 }
             ]

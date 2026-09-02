@@ -122,15 +122,14 @@ def test_disabled_required_provider_does_not_require_environment_values() -> Non
 def test_unpaywall_is_optional_but_enabled_instance_requires_contact() -> None:
     registry = _resolver_registry()
     assert resolve_oa_resolver_config({}, registry, {}) is None
-    assert resolve_oa_resolver_config(
-        {"oa_resolvers": {"unpaywall": {"enabled": False}}}, registry, {}
-    ) is None
+    assert (
+        resolve_oa_resolver_config(
+            {"oa_resolvers": {"unpaywall": {"enabled": False}}}, registry, {}
+        )
+        is None
+    )
 
-    data = {
-        "oa_resolvers": {
-            "unpaywall": {"enabled": True, "contact_email_env": "CONTACT_ENV"}
-        }
-    }
+    data = {"oa_resolvers": {"unpaywall": {"enabled": True, "contact_email_env": "CONTACT_ENV"}}}
     with pytest.raises(ConfigFailure):
         resolve_oa_resolver_config(data, registry, {})
     resolved = resolve_oa_resolver_config(

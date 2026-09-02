@@ -126,9 +126,18 @@ async def test_debug_cli_workflow_preserves_public_contract_and_correlates_trace
         stdout=business_stdout,
         stderr=business_stderr,
     )
+    stop_stdout = StringIO()
+    stop_stderr = StringIO()
+    stop_code = await run_command(
+        parser.parse_args(["stop"]),
+        paths,
+        stdout=stop_stdout,
+        stderr=stop_stderr,
+    )
+    start_code = await asyncio.wait_for(start_task, timeout=2.0)
+
     assert keyword_code == 0
     assert business_stderr.getvalue() == ""
-
     result_path = Path(business_stdout.getvalue().strip())
     assert result_path.name == "keyword-a1b2c3d4.jsonl"
     assert business_stdout.getvalue() == f"{result_path}\n"
@@ -145,18 +154,10 @@ async def test_debug_cli_workflow_preserves_public_contract_and_correlates_trace
         },
     ]
     assert all(set(record) == {"url", "abstract"} for record in records)
-
-    stop_stdout = StringIO()
-    stop_stderr = StringIO()
-    assert await run_command(
-        parser.parse_args(["stop"]),
-        paths,
-        stdout=stop_stdout,
-        stderr=stop_stderr,
-    ) == 0
+    assert stop_code == 0
     assert stop_stdout.getvalue() == "Daemon stopped.\n"
     assert stop_stderr.getvalue() == ""
-    assert await start_task == 0
+    assert start_code == 0
     assert runtime.close_calls == 1
 
     debug_log = paths.debug_log_file.read_text(encoding="utf-8")
@@ -176,21 +177,17 @@ async def test_debug_cli_workflow_preserves_public_contract_and_correlates_trace
     assert any("event=workflow_started" in line for line in request_lines)
     assert any("event=workflow_completed" in line for line in request_lines)
     assert any(
-        "event=provider_started" in line and "provider=keyword" in line
-        for line in request_lines
+        "event=provider_started" in line and "provider=keyword" in line for line in request_lines
     )
     assert any(
-        "event=provider_completed" in line and "provider=keyword" in line
-        for line in request_lines
+        "event=provider_completed" in line and "provider=keyword" in line for line in request_lines
     )
     assert any("event=body_accepted" in line for line in request_lines)
     assert any(
-        "event=body_rejected" in line and "reason=judge_rejected" in line
-        for line in request_lines
+        "event=body_rejected" in line and "reason=judge_rejected" in line for line in request_lines
     )
     assert any(
-        "event=results_written" in line and str(result_path) in line
-        for line in request_lines
+        "event=results_written" in line and str(result_path) in line for line in request_lines
     )
     assert "https://example.com/accepted?id=42&mode=test" in debug_log
     assert "https://example.com/rejected?id=43&mode=test" in debug_log
@@ -224,22 +221,25 @@ async def test_normal_mode_equivalent_workflow_creates_no_debug_log(tmp_path: Pa
 
     stdout = StringIO()
     stderr = StringIO()
-    assert await run_command(
+    keyword_code = await run_command(
         parser.parse_args(["keyword-search", "normal query"]),
         paths,
         stdout=stdout,
         stderr=stderr,
-    ) == 0
-    assert Path(stdout.getvalue().strip()).name == "keyword-b1b2c3d4.jsonl"
-    assert stderr.getvalue() == ""
-
-    assert await run_command(
+    )
+    stop_code = await run_command(
         parser.parse_args(["stop"]),
         paths,
         stdout=StringIO(),
         stderr=StringIO(),
-    ) == 0
-    assert await start_task == 0
+    )
+    start_code = await asyncio.wait_for(start_task, timeout=2.0)
+
+    assert keyword_code == 0
+    assert Path(stdout.getvalue().strip()).name == "keyword-b1b2c3d4.jsonl"
+    assert stderr.getvalue() == ""
+    assert stop_code == 0
+    assert start_code == 0
     assert start_stdout.getvalue() == ""
     assert start_stderr.getvalue() == ""
     assert not paths.debug_log_file.exists()

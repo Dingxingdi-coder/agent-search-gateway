@@ -198,7 +198,7 @@ async def test_retry_hooks_do_not_reclassify_non_retryable_or_cancelled_failures
         {"request_timeout_seconds": 0},
         {"base_delay_seconds": float("nan")},
         {"max_delay_seconds": float("inf")},
-        {"request_timeout_seconds": float("-inf")}
+        {"request_timeout_seconds": float("-inf")},
     ],
 )
 def test_retry_config_rejects_invalid_values(retry_table: dict[str, object]) -> None:

@@ -100,9 +100,7 @@ async def test_partial_success_and_completed_empty_are_success_but_all_fail_is_e
 
     all_failed_dir = tmp_path / "failed"
     with pytest.raises(ExecutionFailure) as caught:
-        await _orchestrator(all_failed_dir, [failed]).paper_search(
-            "query", request_id="33333333"
-        )
+        await _orchestrator(all_failed_dir, [failed]).paper_search("query", request_id="33333333")
     assert caught.value.code is ErrorCode.ALL_PROVIDERS_FAILED
     assert not list(all_failed_dir.glob("paper-*.jsonl"))
 

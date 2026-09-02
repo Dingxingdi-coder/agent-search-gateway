@@ -15,9 +15,7 @@ def test_academic_credentials_and_contact_are_redacted_from_fields_and_traceback
     session.add_secrets((credential,), (contact,))
     try:
         try:
-            raise RuntimeError(
-                f"{credential.reveal()} {contact.reveal()}"
-            )
+            raise RuntimeError(f"{credential.reveal()} {contact.reveal()}")
         except RuntimeError:
             log_event(
                 logging.getLogger("agent_search_gateway.observability.redaction_test"),

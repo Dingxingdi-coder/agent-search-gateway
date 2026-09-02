@@ -135,9 +135,7 @@ async def test_paper_scope_aggregates_invocations_isolates_parser_failure_and_ha
         {"good": good, "malformed": malformed, "duplicate": duplicate},
     )
 
-    path = Path(
-        await orchestrator.llm_search("prompt", request_id="33333333", scope="paper")
-    )
+    path = Path(await orchestrator.llm_search("prompt", request_id="33333333", scope="paper"))
     lines = [json.loads(line) for line in path.read_text().splitlines()]
     assert len(lines) == 1
     assert lines[0]["title"] == "Shared Paper"

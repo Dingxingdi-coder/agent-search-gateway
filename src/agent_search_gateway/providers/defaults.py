@@ -71,9 +71,7 @@ def build_default_registry() -> ProviderRegistry:
             "parallel",
             ProviderCapabilities(search=True, fetch=True),
             ParallelAdapter,
-            frozenset(
-                {"api_url", "mode", "search_fetch_policy", "extract_fetch_policy"}
-            ),
+            frozenset({"api_url", "mode", "search_fetch_policy", "extract_fetch_policy"}),
         ),
         WebProviderRegistration(
             "brightdata",

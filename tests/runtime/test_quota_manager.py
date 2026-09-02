@@ -91,16 +91,10 @@ async def test_quota_debug_events_cover_acquire_wait_try_release_and_cancellatio
         and "limit=1" in line
         for line in logged
     )
+    assert any("request=33333333" in line and "event=quota_waiting" in line for line in logged)
+    assert any("request=22222222" in line and "event=quota_waiting" in line for line in logged)
     assert any(
-        "request=33333333" in line and "event=quota_waiting" in line for line in logged
-    )
-    assert any(
-        "request=22222222" in line and "event=quota_waiting" in line for line in logged
-    )
-    assert any(
-        "request=22222222" in line
-        and "event=quota_acquired" in line
-        and "waited_ms=" in line
+        "request=22222222" in line and "event=quota_acquired" in line and "waited_ms=" in line
         for line in logged
     )
     assert sum("event=quota_released" in line for line in logged) == 2

@@ -40,9 +40,7 @@ async def test_dblp_malformed_xml_is_protocol_failure() -> None:
 
 
 async def test_dblp_failure_does_not_trigger_html_fallback() -> None:
-    executor = RecordingJsonExecutor(
-        [ExecutionFailure(ErrorCode.ALL_PROVIDERS_FAILED, "failed")]
-    )
+    executor = RecordingJsonExecutor([ExecutionFailure(ErrorCode.ALL_PROVIDERS_FAILED, "failed")])
     with pytest.raises(ExecutionFailure):
         await DblpProvider(executor).search("query")
     assert len(executor.requests) == 1
