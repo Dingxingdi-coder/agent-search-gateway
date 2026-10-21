@@ -510,7 +510,8 @@ Repeat one compact LLM case:
 2. request provider+model combination;
 3. assert only matching invocation runs;
 4. request mismatched pair;
-5. assert CLI receives `BAD_REQUEST` text on stderr and no output file is created.
+5. assert the decoded protocol response has `ErrorResponse.error == ErrorCode.BAD_REQUEST`;
+6. assert the CLI exits with code 1, leaves stdout empty, prints the pair-specific mismatch message followed by a newline on stderr, and creates no output file.
 
 The acceptance layer should not duplicate the full selector matrix already covered by orchestrator unit tests.
 
